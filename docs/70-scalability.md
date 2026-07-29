@@ -269,8 +269,8 @@ The ladder is authoritative alongside [AI pipeline §degradation](21-ai-pipeline
 ### 5.4 Backpressure
 
 End-to-end, bounded at every hop (detail in [Backend services §6.4](20-backend-services.md)):
-- **Client → gateway:** gateway watches Redis `XADD` latency + per-session buffer depth; emits `{t:"backpressure", level:"shed"}`; client drops to lower-bitrate Opus, then VAD-gated silence-frame dropping. Hard cap → socket close `1013`. **Never buffer unbounded audio server-side.**
-- **Gateway → orchestrator:** Redis stream depth is monitored; a slow orchestrator consumer applies backpressure upstream rather than growing the stream unboundedly.
+- **Client → gateway:** gateway watches per-session buffer depth (audio frames stay in-process, never Redis); emits `{t:"backpressure", level:"shed"}`; client drops to lower-bitrate Opus, then VAD-gated silence-frame dropping. Hard cap → socket close `1013`. **Never buffer unbounded audio server-side.**
+- **Gateway → orchestrator:** gRPC/HTTP/2 stream flow control applies backpressure upstream; per-session buffer depth is watermarked, never a Redis stream.
 - **Orchestrator → providers:** the STT lease pool + Claude token bucket *are* the backpressure — no lease/no token ⇒ degrade per the ladder, never queue the live path unboundedly.
 
 ### 5.5 Bulkheads & isolation

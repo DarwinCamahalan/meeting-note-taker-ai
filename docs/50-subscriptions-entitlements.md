@@ -212,7 +212,7 @@ sequenceDiagram
 `api` uses a NestJS guard; `ws-gateway` checks at session-open and mid-stream.
 
 ```ts
-// api: apps/api/src/entitlements/require-entitlement.guard.ts
+// api: services/api/src/entitlements/require-entitlement.guard.ts
 @Injectable()
 export class RequireEntitlementGuard implements CanActivate {
   constructor(private readonly ent: EntitlementsClient,
@@ -405,7 +405,7 @@ sequenceDiagram
 ## 10. Open questions & risks
 
 - **Team pooled-minute fairness**: pooling across seats can let one heavy user exhaust the team pool. Do we need per-seat soft sub-caps configurable by admins? Leaning yes for Team GA.
-- **Overage price sensitivity**: per-minute overage rate must beat marginal COGS with margin but not shock users; the exact number is owned by [Unit Economics](71-unit-economics.md) and must be finalized before Pro launch.
+- **Overage price sensitivity**: the canonical overage rate is **$0.13/min** (Reconciled per [decision record](04-decision-record.md) (F-01)) — set to preserve the ~10×-COGS margin defense (~9× the ~1.5¢/min live COGS); the residual risk is confirming it does not shock users, i.e. validating against willingness-to-pay before Pro launch. Cost basis owned by [Unit Economics](71-unit-economics.md).
 - **Enterprise custom entitlements at scale**: the override layer works for a handful of custom deals; beyond ~50 enterprise accounts we may need a first-class "entitlement plan" entity rather than per-subject overrides.
 - **Trial abuse**: card-less trials invite multi-account farming for free Pro minutes. Mitigation (device binding via [Auth](40-authentication.md), email/domain heuristics) needs a defined threshold before scale.
 - **Quota reset vs. annual billing edge cases**: annual subscribers whose monthly quota-reset anchor drifts across DST / month-length boundaries — need deterministic anchor math (store the anchor day, clamp to month length).

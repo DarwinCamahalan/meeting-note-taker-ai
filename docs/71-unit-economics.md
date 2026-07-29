@@ -89,12 +89,12 @@ It does not define the tiers or entitlement enforcement ([Subscriptions & entitl
 
 | Event | Model | Est. tokens | Est. cost/event |
 |---|---|---|---|
-| "Expand answer" hotkey (Pro+) | Sonnet 5 (intro $2/$10) | ~5K in (cached-heavy) + 512 out | **~$0.02–0.03** |
+| "Expand answer" hotkey (Pro+) | Sonnet 5 (base $3/$15) | ~5K in (cached-heavy) + 512 out | **~$0.03–0.045** (intro $2/$10 → ~$0.02–0.03 while it lasts) |
 | Pre-call prep (resume × JD) | Opus 5 thinking-on | ~15K in + ~3K out | **~$0.15–0.20** |
 | Post-call summary + actions | Sonnet 5 thinking-on | ~8K in + ~1.5K out | **~$0.04–0.06** |
 | Mock-interview grading | Opus 5 | ~20K in + ~4K out | **~$0.20–0.30** |
 
-These are **low-frequency and user/async-initiated**, so they add a modest per-user monthly increment (§4), not a per-minute cost. Sonnet's post-intro price (after 2026-08-31) roughly 1.5× these — tracked as a margin risk (§9).
+These are **low-frequency and user/async-initiated**, so they add a modest per-user monthly increment (§4), not a per-minute cost. Costs above use Sonnet's **post-intro base price $3/$15** (Reconciled per [decision record](04-decision-record.md) (F-07)); the intro $2/$10 (through 2026-08-31) makes the Sonnet events ~0.67× while it lasts — **expiring upside, never the base case** (§9).
 
 ---
 
@@ -120,7 +120,7 @@ These are **low-frequency and user/async-initiated**, so they add a modest per-u
 | **Gross profit** | **$13.68** | **–$0.64** |
 | **Gross margin** | **~72%** | **~–3%** |
 
-**The cap user is exactly break-even/slightly negative — which is why the minute cap and metered overage exist.** Past the cap, overage bills at **~$0.15/min (≈10× COGS)**, so the heaviest users become *more* profitable, not less. The 72% margin on the average user is the real business.
+**The cap user is exactly break-even/slightly negative — which is why the minute cap and metered overage exist.** Past the cap, overage bills at the canonical **$0.13/min (≈9× the ~1.5¢/min live COGS)** (Reconciled per [decision record](04-decision-record.md) (F-01)), so the heaviest users become *more* profitable, not less. The 72% margin on the average user is the real business.
 
 ### 4.2 Team ($30/user/mo)
 
@@ -212,18 +212,20 @@ Annual plans (canonical: **2 months free** → Pro $200/yr = $16.67/mo effective
 
 ## 8. Sensitivity: margin vs model mix vs usage
 
-Pro net revenue = $19.12/mo. Cells = **gross margin %** at the given avg monthly live minutes and the given share of cues escalated off Haiku onto Sonnet 5 (intro $2/$10). Includes STT + infra; excludes overage (which only *improves* the >cap columns).
+Pro net revenue = $19.12/mo. Cells = **gross margin %** at the given avg monthly live minutes and the given share of cues escalated off Haiku onto Sonnet 5 at the **post-intro base price $3/$15** (Reconciled per [decision record](04-decision-record.md) (F-07)). Includes STT + infra; excludes overage (which only *improves* the >cap columns).
 
 | Avg min/mo ↓ / % cues on Sonnet → | 0% (all Haiku) | 10% | 25% | 50% |
 |---|---|---|---|---|
-| **150 min** | 86% | 85% | 84% | 82% |
-| **300 min (modeled avg)** | 72% | 71% | 68% | 64% |
-| **600 min** | 45% | 42% | 38% | 30% |
-| **1,000 min** | 8% | 3% | –6% | –21% |
-| **1,200 min (cap)** | –3% | –9% | –19% | –37% |
+| **150 min** | 86% | 85% | 83% | 80% |
+| **300 min (modeled avg)** | 72% | 70% | 66% | 59% |
+| **600 min** | 45% | 40% | 33% | 21% |
+| **1,000 min** | 8% | 0% | –14% | –36% |
+| **1,200 min (cap)** | –3% | –13% | –28% | –55% |
+
+> The 0% (all-Haiku) column is unaffected by Sonnet pricing. The intro $2/$10 (through 2026-08-31) makes each Sonnet-share cell a few points higher than shown — **expiring upside, not the base case**; the base-case grid uses $3/$15.
 
 **Reading it:**
-- **Model mix matters far less than usage.** Even 50%-Sonnet at average usage (64%) beats all-Haiku at heavy usage (45%). Haiku routing protects the tail but usage is the dominant axis.
+- **Model mix matters far less than usage.** Even 50%-Sonnet at average usage (59%) beats all-Haiku at heavy usage (45%). Haiku routing protects the tail but usage is the dominant axis.
 - **The cliff is minutes, not models** — which is exactly why the **minute cap + metered overage** ([Subscriptions](50-subscriptions-entitlements.md)) is the load-bearing margin control. Below ~600 min the tier is comfortably profitable at any realistic model mix.
 - **This is why live cues default to Haiku with Sonnet opt-in only** ([AI pipeline §5 ADR](21-ai-pipeline.md)): it keeps the whole grid in the black at expected usage.
 
@@ -236,7 +238,7 @@ Pro net revenue = $19.12/mo. Cells = **gross margin %** at the given avg monthly
 | **Prompt caching** (0.1× cached reads) | [AI pipeline §6](21-ai-pipeline.md) | –71% LLM cost/session (§3.2) — the biggest lever |
 | **Haiku-default routing** | [AI pipeline §5](21-ai-pipeline.md) | keeps LLM < STT cost; Sonnet/Opus opt-in/async only |
 | **`max_tokens` caps** (160 cue / 512 expand) | [AI pipeline §9](21-ai-pipeline.md) | bounds the expensive output side ($5–25/1M) |
-| **Minute caps + metered overage** | [Subscriptions](50-subscriptions-entitlements.md) | converts unbounded variable cost → bounded; overage @ ~10× COGS makes heavy users profitable |
+| **Minute caps + metered overage** | [Subscriptions](50-subscriptions-entitlements.md) | converts unbounded variable cost → bounded; overage @ $0.13/min (~9× COGS) makes heavy users profitable |
 | **Cue debounce/dedupe** | [AI pipeline §9](21-ai-pipeline.md) | fewer cues/min → lower LLM + STT-adjacent cost |
 | **Free tier limits** (60 min, Haiku, no RAG) | [Subscriptions](50-subscriptions-entitlements.md) | caps loss-leader at <$0.90/user/mo |
 | **STT commit / on-prem (Enterprise)** | [Scalability §2.2](70-scalability.md) | lowers the dominant COGS line at scale |
@@ -257,7 +259,7 @@ Pro net revenue = $19.12/mo. Cells = **gross margin %** at the given avg monthly
 ## 11. Open questions & risks
 
 1. **STT unit price is the biggest unknown and the dominant COGS line.** The whole 72% Pro margin rides on ~$0.0075/min holding. A 2× STT price would drop average-Pro margin to ~55% — must be locked with a committed-use contract early ([Scalability §9](70-scalability.md)).
-2. **Sonnet 5 intro-pricing cliff (2026-08-31).** Post-intro $3/$15 (1.5× current) raises "expand"/summary cost; the router must be ready to tighten Sonnet eligibility or revert more to Haiku ([AI pipeline open Q](21-ai-pipeline.md)).
+2. **Sonnet 5 intro-pricing upside ends (2026-08-31).** All COGS/margin/sensitivity math here already uses the **post-intro base $3/$15** (F-07), so there is **no margin cliff** when the intro lapses — the intro $2/$10 was only ever counted as expiring upside (~0.67× on Sonnet events). The residual action is unchanged: keep Sonnet eligibility tight and revert to Haiku under load ([AI pipeline open Q](21-ai-pipeline.md)).
 3. **Usage assumptions (300 min avg Pro) are guesses.** If real avg is 600+ min, average-Pro margin roughly halves; §8 shows the cliff. Need telemetry-driven caps and possibly a lower default cap.
 4. **Cues/min (4) and tokens/cue drive everything.** A chattier cue cadence or larger prefixes move COGS linearly; [Observability](61-observability.md) per-request cost telemetry must replace these estimates fast.
 5. **Conversion (5%) and churn (5%/mo) are unvalidated** and set LTV/CAC and free-tier viability. Real cohort data required before committing marketing spend against a $90 CAC ceiling.

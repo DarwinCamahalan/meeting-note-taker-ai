@@ -8,24 +8,24 @@ This doc owns the **backend service topology** for Cue: what each service does, 
 
 ## 1. Service catalog
 
-Five deployable backend services plus the two clients they serve. All are TypeScript on Node 22 LTS, containerized, and run on AWS ECS Fargate behind an ALB. See [DevOps](60-devops-infrastructure.md) for the cluster/task-definition detail.
+Four deployable backend services in v1 (`api`, `ws-gateway`, `ai-orchestrator`, `entitlements`) plus the two clients they serve; `billing-webhooks` is a canonical logical service that ships as a NestJS module inside `services/api` in v1, extractable to a standalone service later (see A02). All are TypeScript on Node 22 LTS, containerized, and run on AWS ECS Fargate behind an ALB. See [DevOps](60-devops-infrastructure.md) for the cluster/task-definition detail. Reconciled per [decision record](04-decision-record.md) (A02).
 
 | Service | Runtime | Protocol in | Scales on | Durable state | Owns |
 |---|---|---|---|---|---|
 | `api` | NestJS 11 | HTTPS (REST) | RPS / CPU | none (stateless) | CRUD, auth exchange, uploads, entitlement checks, session lifecycle |
 | `ws-gateway` | Node + `ws`/uWebSockets.js | WSS | concurrent connections | Redis (session/presence) | realtime transport, audio ingest, cue fan-out, backpressure |
-| `ai-orchestrator` | NestJS 11 (worker mode) | internal gRPC + Redis streams | active AI sessions | Redis (stream buffers) | STT ↔ Claude ↔ RAG streaming pipeline |
+| `ai-orchestrator` | NestJS 11 (lean/standalone bootstrap, no HTTP middleware on the gRPC hot path) | internal gRPC (bidi streaming) | active AI sessions | Redis (session offsets / control only) | STT ↔ Claude ↔ RAG streaming pipeline |
 | `entitlements` | NestJS 11 | internal REST + Redis | RPS | Redis + Postgres | source of truth for feature gates & usage counters |
-| `billing-webhooks` | NestJS 11 | HTTPS (Stripe webhooks) | webhook volume | Postgres | ingest Stripe events → drive entitlements |
+| `billing-webhooks` | NestJS 11 module in `services/api` (v1); extractable at sustained webhook volume/latency | HTTPS (Stripe webhooks) | webhook volume | Postgres | ingest Stripe events → drive entitlements |
 
-`ai-orchestrator` and `billing-webhooks` also run **BullMQ workers** for async jobs (§7).
+`ai-orchestrator` and `api` (which hosts the `billing-webhooks` module) also run **BullMQ workers** for async jobs (§7).
 
-### 1.1 Why five services, not one
+### 1.1 Why four v1 services (five logical), not one
 
-**Decision.** Split the realtime hot path (`ws-gateway` + `ai-orchestrator`) from the request/response BFF (`api`), and isolate money-handling (`entitlements`, `billing-webhooks`).
+**Decision.** Split the realtime hot path (`ws-gateway` + `ai-orchestrator`) from the request/response BFF (`api`), and isolate money-handling in `entitlements`. `billing-webhooks` is a canonical logical service that ships as a NestJS module inside `services/api` for v1 (own controller/route + Stripe raw-body signature verification), extractable to a standalone `services/billing-webhooks` when sustained webhook volume or processing latency threatens the `api` deploy cadence/blast radius. Reconciled per [decision record](04-decision-record.md) (A02).
 **Context.** The live path has a < 1.2s p95 SLO and a fundamentally different scaling curve (long-lived stateful connections, GPU-adjacent LLM/STT fan-out) than CRUD. Billing must never share a blast radius with user-facing latency.
 **Alternatives considered.** (a) One NestJS monolith — simplest, but a slow LLM stream or a webhook storm would starve CRUD; deploys couple unrelated code. (b) Fully per-domain microservices — premature; ops overhead outweighs benefit at our stage.
-**Trade-offs.** Five services adds inter-service contracts and deploy surface, but each scales and fails independently.
+**Trade-offs.** Four deployable services add inter-service contracts and deploy surface, but each scales and fails independently; keeping `billing-webhooks` as an in-`api` module in v1 avoids a fifth deploy target until webhook load warrants it.
 **Consequence.** Client edges (`api`, `ws-gateway`) are stateless and horizontally scalable; the stateful core is Postgres/Redis/R2. Matches ADR-003 in [System architecture](02-system-architecture.md).
 
 ---
@@ -44,9 +44,9 @@ flowchart TB
         ws["ws-gateway<br/>realtime transport"]
         ai["ai-orchestrator<br/>STT+LLM+RAG"]
         ent["entitlements<br/>feature gates"]
-        bw["billing-webhooks<br/>Stripe ingest"]
+        bw["billing-webhooks<br/>Stripe ingest<br/>(module in api, v1)"]
 
-        redis[("Redis<br/>cache · queues · streams · sessions")]
+        redis[("Redis<br/>cache · queues · sessions · control state")]
         pg[("Postgres 16<br/>+ pgvector")]
         r2[("R2 / S3<br/>uploads · installers")]
     end
@@ -66,7 +66,7 @@ flowchart TB
     api --> r2
     api -. "enqueue jobs" .-> redis
 
-    ws <-->|Redis streams| ai
+    ws <-->|gRPC bidi stream| ai
     ws --> ent
     ai --> stt
     ai --> claude
@@ -83,7 +83,7 @@ flowchart TB
 
 **Rules that keep boundaries clean:**
 
-1. **Only `api` and `ws-gateway` are internet-facing** (plus `billing-webhooks` on a dedicated path). Everything else is VPC-internal, reachable via ECS Service Connect / Cloud Map DNS.
+1. **Only `api` and `ws-gateway` are internet-facing.** The Stripe webhook path is served by `api` (the `billing-webhooks` module) on a dedicated signature-verified route. Everything else is VPC-internal, reachable via ECS Service Connect / Cloud Map DNS.
 2. **No service reads Stripe directly** except `billing-webhooks`. Feature checks always go through `entitlements`. See [Entitlements](50-subscriptions-entitlements.md).
 3. **The realtime path never traverses `api`.** `desktop` opens a WSS to `ws-gateway`; `api` only mints the short-lived WS ticket (§6.2).
 4. **All cross-service DTOs live in `packages/types`.** No service hand-rolls another service's shapes (§8).
@@ -99,7 +99,7 @@ The Backend-for-Frontend that both `desktop` and `web` call for everything that 
 NestJS feature modules, one per resource, each following the same internal shape. This mirrors the frontend code-splitting discipline in [Engineering standards](13-engineering-standards.md) — thin controllers orchestrate; logic lives in services; DTOs are typed and shared.
 
 ```
-apps/api/src/
+services/api/src/
 ├── main.ts                      # bootstrap, global pipes/filters/interceptors
 ├── app.module.ts
 ├── common/
@@ -116,6 +116,7 @@ apps/api/src/
 │   ├── transcripts/             # transcript + cue history (read-mostly)
 │   ├── documents/               # RAG uploads: presigned PUT, status, list, delete
 │   ├── billing/                 # Stripe Checkout / Portal session creation (thin)
+│   ├── billing-webhooks/        # Stripe webhook controller + raw-body sig verify (canonical logical service, module in api v1 — A02)
 │   └── health/                  # liveness / readiness
 ├── clients/                     # generated SDK-adjacent internal clients (ent, ai)
 └── db/                          # Drizzle instance + repositories
@@ -301,7 +302,7 @@ const { ticket, wsUrl } = await cue.sessions.wsTicket(session.id);
 
 ## 6. `ws-gateway` — realtime transport
 
-The always-on WebSocket edge for the live path. It does **transport only**: authenticate the connection, ingest binary audio frames, relay them to `ai-orchestrator` over a Redis stream, and fan cues/transcripts back to the one connected client. The AI work itself is in [AI pipeline](21-ai-pipeline.md).
+The always-on WebSocket edge for the live path. It does **transport only**: authenticate the connection, ingest binary audio frames, relay them to `ai-orchestrator` over a **gRPC bidirectional stream** (HTTP/2, typed, low-latency), and fan cues/transcripts back to the one connected client. Redis is **not** on the per-frame audio path — it holds only control state (single-use ticket, session/presence, resume offsets). The AI work itself is in [AI pipeline](21-ai-pipeline.md). Reconciled per [decision record](04-decision-record.md) (A01).
 
 ### 6.1 Connection lifecycle
 
@@ -312,25 +313,27 @@ sequenceDiagram
     participant API as api
     participant WS as ws-gateway
     participant ENT as entitlements
-    participant R as Redis stream
+    participant R as Redis (control)
     participant AI as ai-orchestrator
 
     D->>API: POST /v1/sessions/:id/ws-ticket  (Bearer JWT)
     API-->>D: { ticket (60s, single-use), wsUrl }
     D->>WS: WSS connect ?ticket=...  (Sec-WebSocket-Protocol: cue.v1)
-    WS->>WS: verify ticket sig + one-time-use (Redis SETNX), bind session/user/device
+    WS->>R: SETNX ws:ticket:{jti}  (one-time-use replay guard)
+    WS->>WS: verify ticket sig, bind session/user/device
     WS->>ENT: check live-minutes entitlement (cached)
     ENT-->>WS: ok (remaining minutes > 0)
+    WS->>AI: open gRPC bidi stream (sessionId, ctx)
     WS-->>D: {t:"ready", sessionId, protocol:"cue.v1", heartbeatSec:15}
     loop live audio
         D->>WS: binary audio frame (Opus 20ms)
-        WS->>R: XADD audio:{sessionId} *
-        AI->>R: XREADGROUP (consume)
-        AI->>R: XADD cues:{sessionId} *  (partial transcript / cue tokens)
+        WS->>AI: audio frame (gRPC bidi stream, uplink)
+        AI->>WS: cue.delta / transcript.partial (gRPC bidi stream, downlink)
         WS->>D: {t:"transcript.partial"|"cue.delta"|"cue.final", ...}
+        WS->>R: write last-emitted offset (control state, for resume)
     end
     D->>WS: {t:"end"}  or  disconnect
-    WS->>R: XADD control:{sessionId} {finalize}
+    WS->>AI: half-close stream (finalize)
     WS-->>D: {t:"session.finalizing"}  then close 1000
 ```
 
@@ -383,21 +386,21 @@ export type ServerMsg =
 
 Audio arrives at a fixed real-time rate, but downstream (STT/LLM) can momentarily lag. The gateway protects itself and the client:
 
-- **Ingest side (client→gateway):** the gateway watches its Redis `XADD` latency and the per-session buffer depth. If the audio stream backlog exceeds a threshold, it emits `{t:"backpressure", level:"shed"}`; the desktop client responds by dropping to a lower-bitrate Opus profile and, if still saturated, dropping loopback silence frames (VAD-gated). We never buffer unbounded audio server-side.
+- **Ingest side (client→gateway):** the gateway watches the gRPC/HTTP2 stream flow-control signals to `ai-orchestrator` and the per-session buffer depth. If the audio backlog exceeds a threshold, it emits `{t:"backpressure", level:"shed"}`; the desktop client responds by dropping to a lower-bitrate Opus profile and, if still saturated, dropping loopback silence frames (VAD-gated). We never buffer unbounded audio server-side.
 - **Egress side (gateway→client):** cue/transcript frames are small; we cap the outbound queue per socket. If the client's TCP send buffer is full (slow network), we coalesce `transcript.partial` frames (keep latest, drop superseded partials) rather than growing the queue — partials are disposable, finals are not.
 - **Hard limit:** per-connection max in-flight bytes; exceeding it closes the socket with code `1013` (try again later) and a `error` frame.
 
 ### 6.5 Heartbeat & reconnection
 
 - **Heartbeat:** app-level `heartbeat` every 15s each way (not just WS ping/pong, so we detect a half-open app even when the TCP stack thinks it is fine). Miss 2 → server closes with `1001`.
-- **Reconnection:** the client reconnects with exponential backoff (0.5s → cap 10s, full jitter). It requests a **fresh WS ticket** each time (tickets are single-use). The session is **resumable**: the gateway keeps the session's Redis stream and last-emitted offsets for a grace window (60s), so on reconnect within the window the client sends `{t:"hello", resumeFrom:<lastSeq>}` and the gateway replays only missed `cue.final`/`transcript.final` frames. Beyond the grace window the session is finalized and the client starts a new one.
+- **Reconnection:** the client reconnects with exponential backoff (0.5s → cap 10s, full jitter). It requests a **fresh WS ticket** each time (tickets are single-use). The session is **resumable**: the gateway keeps the session's last-emitted offsets in Redis (control state) for a grace window (60s), so on reconnect within the window the client sends `{t:"hello", resumeFrom:<lastSeq>}` and the gateway replays only missed `cue.final`/`transcript.final` frames. Beyond the grace window the session is finalized and the client starts a new one.
 - **State ownership:** the gateway itself is stateless across restarts — session/presence/offsets live in Redis — so an ECS task replacement during a deploy drains connections and clients reconnect to another task transparently.
 
 ---
 
 ## 7. Job queues — BullMQ on Redis
 
-Async, non-real-time work runs as BullMQ queues (Redis-backed). Producers enqueue; dedicated worker processes (co-located in `ai-orchestrator` and `billing-webhooks` task definitions, or scaled as their own Fargate service under load) consume.
+Async, non-real-time work runs as BullMQ queues (Redis-backed). Producers enqueue; dedicated worker processes (co-located in the `ai-orchestrator` and `api` task definitions — `api` hosts the `billing-webhooks` module — or scaled as their own Fargate service under load) consume.
 
 ```mermaid
 flowchart LR
@@ -446,8 +449,8 @@ packages/types/src/
 
 **Rules:**
 - A service may only import shapes it consumes; it never redefines another service's shape.
-- HTTP DTOs are **derived from** the Zod schemas in `api` (the schema is the runtime validator; the inferred type is exported to `packages/types`) so validation and types can never drift.
-- Breaking a shared type is a breaking change gated by CI (type-check across all packages in the Turborepo graph). See [Repository structure](03-repository-structure.md) and [Engineering standards](13-engineering-standards.md).
+- HTTP/wire DTOs are **generated from** the Zod schemas in `api` via a codegen step: the `api` Zod schemas are the single source of truth (the schema is the runtime validator), and `z.infer` emits the shared static DTO types into `packages/types`, consumed by `sdk`, `ws-gateway`, `entitlements`, and the clients. A **CI drift check** (`turbo run codegen:check`) regenerates and fails the build if the committed types diverge from the schemas, so validation and types can never drift. DB row types are a separate axis — inferred from the Drizzle schema ([Data model §4](30-data-model.md)) and re-exported through `packages/types`; the two owners do not overlap. Reconciled per [decision record](04-decision-record.md) (A09).
+- Breaking a shared type is a breaking change gated by CI (type-check across all packages in the Turborepo graph, plus the DTO codegen drift check). See [Repository structure](03-repository-structure.md) and [Engineering standards](13-engineering-standards.md).
 
 ```ts
 // packages/types/src/internal/entitlements.ts — consumed by api, ws-gateway
@@ -517,32 +520,34 @@ Each service is one ECS Fargate **service** in the cluster, task defs and autosc
 flowchart TB
     alb["ALB (HTTPS)"] --> api
     nlb["ALB (WSS, sticky by conn)"] --> ws
-    stripeEdge["Stripe → dedicated path"] --> bw
-    subgraph fargate["ECS Fargate cluster"]
-        api["api ×N (stateless, CPU-scaled)"]
+    stripeEdge["Stripe → dedicated sig-verified route"] --> api
+    subgraph fargate["ECS Fargate cluster (v1)"]
+        api["api ×N (stateless, CPU-scaled)<br/>hosts billing-webhooks module"]
         ws["ws-gateway ×N (conn-scaled, long-lived)"]
         ai["ai-orchestrator ×N (session-scaled) + workers"]
         ent["entitlements ×N (small)"]
-        bw["billing-webhooks ×2 (min)"]
     end
-    api & ws & ai & ent & bw -.->|Service Connect| ai
+    bwFuture["services/billing-webhooks<br/>(future extraction, not in v1)"]:::future
+    ws <-->|gRPC bidi stream| ai
+    api & ws & ai & ent -.->|Service Connect| ai
+    classDef future stroke-dasharray: 5 5,opacity:0.6
 ```
 
 | Service | Scaling signal | Deploy strategy | Notes |
 |---|---|---|---|
-| `api` | ALB RPS + CPU | rolling / canary | stateless; fast to scale |
+| `api` | ALB RPS + CPU | rolling / canary | stateless; fast to scale; hosts the `billing-webhooks` module (idempotent Stripe ingest on a dedicated sig-verified route) |
 | `ws-gateway` | active connections | **connection-draining** rolling | long-lived sockets; drain then replace; clients auto-reconnect (§6.5) |
-| `ai-orchestrator` | active AI sessions + queue depth | rolling | workers co-located; HPA on Redis stream lag |
+| `ai-orchestrator` | active AI sessions + queue depth | rolling | workers co-located; HPA on gRPC stream backlog |
 | `entitlements` | RPS | rolling | tiny, cache-fronted |
-| `billing-webhooks` | webhook volume | rolling, min 2 | idempotent; never in user latency path |
+| `billing-webhooks` (logical) | webhook volume | — (module in `api` v1) | canonical logical service; extract to standalone `services/billing-webhooks` when sustained webhook volume/latency threatens the `api` deploy cadence/blast radius (A02) |
 
-Health: `/health/live` (process up) and `/health/ready` (deps reachable) on every service; `ws-gateway` readiness also checks Redis stream connectivity. Regions us-east-1 + eu-west-1 for data residency — [DevOps](60-devops-infrastructure.md), [Scalability](70-scalability.md).
+Health: `/health/live` (process up) and `/health/ready` (deps reachable) on every service; `ws-gateway` readiness also checks the `ai-orchestrator` gRPC channel. Regions us-east-1 + eu-west-1 for data residency — [DevOps](60-devops-infrastructure.md), [Scalability](70-scalability.md).
 
 ---
 
 ## Open questions & risks
 
-1. **gRPC vs Redis-streams for `ws-gateway`↔`ai-orchestrator`.** Redis streams give durability + replay (good for reconnect resume) but add a hop; direct gRPC would shave latency. Leaning Redis streams for v1 (resume semantics win), revisit if the hop shows up in the p95 budget — coordinate with [AI pipeline](21-ai-pipeline.md).
+1. **~~gRPC vs Redis-streams for `ws-gateway`↔`ai-orchestrator`~~ — RESOLVED (A01).** The hop uses **gRPC bidirectional streaming** (HTTP/2, typed, low-latency); Redis is off the per-frame audio path and holds only control state (single-use ticket, session/presence, resume offsets). This also closes the SR-01 per-frame `XADD` SPOF concern. Residual: validate same-AZ gRPC p95 stays inside the §4 budget under load and confirm resume semantics hold with offsets-in-Redis rather than a durable stream — coordinate with [AI pipeline](21-ai-pipeline.md).
 2. **WS ticket vs subprotocol auth.** Single-use tickets add an API round-trip before connect (~1 RTT). Acceptable pre-meeting, but if it hurts reconnection latency we may allow a short grace re-auth using the prior ticket's `jti` lineage.
 3. **Worker co-location.** Running BullMQ workers inside `ai-orchestrator` tasks is simple but couples their scaling; if summary/embedding load spikes independently we split workers into their own Fargate service. Trigger: DLQ growth or worker CPU starving the stream consumer.
 4. **Idempotency store TTL.** 24h covers client retries but not multi-day offline desktop resumes; may need to persist keys for created sessions longer.

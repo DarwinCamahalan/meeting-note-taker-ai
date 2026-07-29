@@ -264,7 +264,7 @@ export const can = (role: OrgRole, action: Action): boolean =>
 ```
 
 ```typescript
-// apps/api/src/auth/roles.guard.ts (orchestrates; logic lives in core)
+// services/api/src/auth/roles.guard.ts (orchestrates; logic lives in core)
 @Injectable()
 export class RolesGuard implements CanActivate {
   constructor(private reflector: Reflector) {}

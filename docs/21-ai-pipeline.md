@@ -41,13 +41,14 @@ flowchart LR
     VOY[Voyage AI<br/>embeddings]
   end
 
-  AUD --> VAD -->|speech frames| WS --> STT
+  AUD --> VAD -->|speech frames| WS
+  WS -->|audio up: gRPC bidi stream| STT
   STT -->|partial + final transcripts| SEG --> CTX
   CTX -->|top-k chunks| PG
   CTX -->|profile + entitlements| RED
   ROUTE --> LLM
   CTX --> ROUTE
-  LLM -->|token stream| WS --> OV
+  LLM -->|cue down: gRPC bidi stream| WS --> OV
   VOY -.->|offline: embed uploads| PG
 ```
 
@@ -71,7 +72,8 @@ sequenceDiagram
   participant C as Claude (Messages API)
 
   D->>G: PCM frames (20ms) over WS, speech only
-  G->>S: forward audio chunks (Deepgram live WS)
+  G->>O: forward audio frames (gRPC bidi stream, uplink)
+  O->>S: forward audio chunks (Deepgram live WS)
   S-->>O: interim transcript ("so tell me about your...")
   S-->>O: final transcript + endpoint (is_final, speech_final)
   O->>O: segmenter marks utterance boundary
@@ -80,7 +82,7 @@ sequenceDiagram
   O->>O: assemble prompt (cached prefix + transcript tail)
   O->>C: messages.create(stream=true, cache_control on prefix)
   C-->>O: content_block_delta (token stream)
-  O-->>G: cue tokens (framed, de-duplicated)
+  O-->>G: cue tokens (gRPC bidi stream, downlink; framed, de-duplicated)
   G-->>D: overlay renders cue incrementally
   Note over D,C: p95 target: speech-final → first cue token < 1.2s
 ```
@@ -98,13 +100,16 @@ The SLO is **< 1.2s p95** from end-of-utterance to first cue token. STT partials
 | 1 | VAD gate + frame batching (desktop) | 20 ms | 40 ms | Silero VAD on 20ms frames; gates silence so we never pay STT for dead air |
 | 2 | Desktop → ws-gateway (WS uplink) | 15 ms | 45 ms | Region-pinned; user routed to nearest edge (us-east-1 / eu-west-1) |
 | 3 | ws-gateway → Deepgram + endpointing | 120 ms | 250 ms | Deepgram streaming, `endpointing=200`, `interim_results=true`; endpoint detection dominates |
-| 4 | Query embedding (Voyage `voyage-3.5-lite`) | 30 ms | 70 ms | Single short query; cached per-utterance keyed on transcript hash |
+| 4 | Query embedding (Voyage `voyage-3.5`, 1024-dim — same model as document embeddings) | 30 ms | 70 ms | Single short query; cached per-utterance keyed on transcript hash; query and document embedding spaces are identical (SR-09) |
 | 5 | pgvector top-k retrieval | 8 ms | 25 ms | HNSW index; k=6; warmed connection pool |
 | 6 | Context assembly (prompt build) | 5 ms | 15 ms | Pure string assembly; cached prefix already resident |
 | 7 | Claude TTFT — Haiku 4.5 (cache hit) | 180 ms | 400 ms | Prompt-cache hit on prefix; thinking off; streaming |
-| 8 | ai-orchestrator → ws-gateway → overlay | 20 ms | 55 ms | Token framing + WS downlink + paint |
+| 8 | Cue return (internal) ai-orchestrator → ws-gateway (gRPC bidi) | 2 ms | 5 ms | Typed cue frames over the HTTP/2 bidi stream; same-AZ (A01) |
+| 9 | Cue return (downlink) ws-gateway → desktop overlay (WSS) | 18 ms | 50 ms | Token framing + WS downlink + overlay paint |
 | | **Total (steady state, cache hit)** | **~400 ms** | **~900 ms** | Comfortably under 1.2s |
 | | **Total (cold: cache miss + retrieval miss)** | ~700 ms | ~1.15s | First request of a session; still within SLO |
+
+Reconciled per [decision record](04-decision-record.md) (A01 hot-path transport, SR-09 embedding model): the `ws-gateway`↔`ai-orchestrator` hop is gRPC bidirectional streaming (hops 2/8) — Redis is not on the per-frame audio path — and the query embedding uses the same `voyage-3.5` @ 1024-dim model as document ingest (hop 4).
 
 Budget guardrails:
 
@@ -233,7 +238,7 @@ flowchart LR
 ```
 
 - **Chunking:** ~512 tokens per chunk, 64-token overlap, split on semantic boundaries (headings, bullet items, paragraphs) via a recursive splitter. Resumes and JDs are small (1–3 chunks each); knowledge bases can be large.
-- **Embeddings:** Voyage AI `voyage-3.5` (1024-dim) for documents at ingest; `voyage-3.5-lite` for the hot-path query embedding (cheaper, faster — step 4 in §4). Stored as pgvector `halfvec(1024)` to halve index size.
+- **Embeddings:** Voyage AI `voyage-3.5` (1024-dim) for **both** document-ingest embeddings **and** the hot-path query embedding (step 4 in §4) — the query and document embedding spaces must be identical, so the same model + dimension is pinned end-to-end. A **guard test fails CI** if the query and document embedding models or dimensions ever diverge, and asserts the pgvector column dimension matches the model output. Stored as pgvector `halfvec(1024)` to halve index size. Reconciled per [decision record](04-decision-record.md) (SR-09).
 - **Metadata:** each chunk row carries `{ user_id, doc_id, doc_type, source_span, token_count }` for filtering and citation.
 
 ### 7.2 Retrieval (online, on the hot path)
@@ -372,7 +377,7 @@ Every degradation keeps the **transcript ribbon** alive if at all possible — l
 
 1. **Cue cadence tuning.** Firing a cue on every settled utterance may over-trigger. Need real-usage data to tune the debounce + `<none>` suppression thresholds; risk of either nagging or feeling absent. Owned jointly with [Design system](12-design-system.md).
 2. **Hot-path retrieval vs. prefix caching tension.** Per-utterance pgvector retrieval (large KBs) mutates context and can hurt cache hit rate. Current split (small docs in cached prefix, large KBs retrieved into the *user* turn) needs validation under load.
-3. **Sonnet 5 intro-pricing cliff (2026-08-31).** The "expand" path economics change when intro pricing ends; unit-economics model must gate whether Sonnet stays the Pro expand default or reverts more aggressively to Haiku.
+3. **Sonnet 5 intro-pricing upside ends (2026-08-31).** The base case already assumes post-intro **$3 / $15 per 1M** (F-07); the intro $2 / $10 is modelled only as expiring upside. When it lapses, the "expand" path loses that cushion but the base economics are unchanged; the unit-economics model still gates whether Sonnet stays the Pro expand default or reverts more aggressively to Haiku. See [Unit economics](71-unit-economics.md).
 4. **Speculative retrieval waste.** Firing embedding+retrieval on interim transcripts saves latency but spends on utterances that never complete. Need to measure the waste ratio vs. latency win.
 5. **Multilingual quality.** Deepgram `nova-3` multilingual + Haiku cue quality for non-native-speaker accessibility (a core persona) is unproven at our latency; may need language-specific routing.
 6. **Injection via live audio.** Adversarial speech from the other party attempting prompt injection — current fencing is prompt-level; consider a lightweight classifier if abuse appears.

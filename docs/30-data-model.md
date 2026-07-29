@@ -8,7 +8,7 @@ This is the authoritative data-layer specification for **Cue** (provisional bran
 
 ## 1. Principles
 
-1. **SQL-first, strongly typed.** Drizzle ORM is the single source of truth for schema. TypeScript DTOs are derived from the schema via `InferSelectModel` / `InferInsertModel` and re-exported from `packages/types`. No `any`; no schema drift between DB and app.
+1. **SQL-first, strongly typed.** Drizzle ORM is the single source of truth for **DB row types**, derived via `InferSelectModel` / `InferInsertModel` and re-exported (generated, not hand-written) into `packages/types`. This is a distinct, non-overlapping axis from **API/wire DTOs**, which are generated from the `api` Zod schemas (their source of truth) — see [Engineering standards](13-engineering-standards.md) §1/§2 and [decision record](04-decision-record.md) (A09). A CI drift check regenerates both and fails on divergence. No `any`; no schema drift between DB and app.
 2. **Tenant-scoped by default.** Every row that belongs to a customer carries an `org_id`. A user always acts inside exactly one org context per request (a personal org for consumer/Free users, a real org for Team/Enterprise). See [§8 Multi-tenancy](#8-multi-tenancy-isolation).
 3. **Hot vs. warm vs. cold separation.** Live transcript deltas stream through Redis (ephemeral); durable transcript + AI output land in Postgres; large blobs (uploads, exports, installers) live in object storage. Postgres never stores raw audio.
 4. **PII minimization + retention by class.** Every table is tagged with a PII class (see [§9](#9-data-lifecycle--retention)). Retention and deletion are enforced by scheduled jobs, not by hope.
@@ -350,7 +350,8 @@ export const documents = pgTable('documents', {
   byOrg: index('documents_org_idx').on(t.orgId),
 }));
 
-// Voyage AI `voyage-3-large` -> 1024 dims. Change the literal here AND reindex if the model changes.
+// Voyage AI `voyage-3.5` -> 1024 dims (same model for query + document embeddings; see 04-decision-record.md SR-09).
+// Change the literal here AND reindex if the model changes.
 export const documentChunks = pgTable('document_chunks', {
   id: primaryId(),
   documentId: uuid('document_id').notNull().references(() => documents.id, { onDelete: 'cascade' }),
@@ -460,6 +461,8 @@ export const auditLogs = pgTable('audit_logs', {
 
 ## 4. Derived types (single source of truth)
 
+> Scope: this section owns **DB row types only** — Drizzle is their source of truth, generated into `packages/types`. API/wire DTOs are a separate axis generated from the `api` Zod schemas; the two owners do not overlap. Reconciled per [decision record](04-decision-record.md) (A09).
+
 ```ts
 // packages/types/src/db.ts — re-exported to sdk + apps
 import type { InferSelectModel, InferInsertModel } from 'drizzle-orm';
@@ -479,8 +482,8 @@ export type DocumentChunk = Omit<InferSelectModel<typeof documentChunks>, 'embed
 | Decision | Value | Rationale |
 |---|---|---|
 | Extension | `vector` (pgvector ≥ 0.7) | Native to Neon / Aurora pg16; no separate vector DB to operate. |
-| Embedding model | Voyage AI `voyage-3-large` | Owned by [AI pipeline](21-ai-pipeline.md); high retrieval quality. |
-| Dimensions | **1024** | Must match the model output exactly; hard-coded in the column + a guard test. |
+| Embedding model | Voyage AI `voyage-3.5` (query + document, 1024-dim) | Owned by [AI pipeline](21-ai-pipeline.md); **identical model + space end-to-end** for both document-ingest and hot-path query embeddings. Reconciled per [decision record](04-decision-record.md) (SR-09). |
+| Dimensions | **1024** | Must match the model output exactly; hard-coded in the `vector(1024)` column + a guard test that pins the column dimension to the model output **and fails if the query and document embedding models/dimensions ever diverge**. |
 | Distance | Cosine (`vector_cosine_ops`) | Voyage embeddings are used with cosine similarity. |
 | Index | **HNSW** (`m=16, ef_construction=64`) | Best recall/latency for our modest per-tenant corpus; no training step, tolerant of incremental inserts (unlike IVFFlat which needs a representative training set and reindex as data grows). |
 | Query-time knob | `SET hnsw.ef_search = 40` per query | Tunes recall vs. latency at read time. |
@@ -658,7 +661,7 @@ CREATE INDEX CONCURRENTLY chunks_embedding_hnsw
 ## Open questions & risks
 
 - **HNSW at scale for large Enterprise KBs:** a single shared index with an `org_id` pre-filter may degrade recall/latency once a tenant's corpus is large. Decision point: move to per-tenant partial indexes or a partitioned `document_chunks` table. Owned jointly with [Scalability](70-scalability.md).
-- **Embedding dimension lock-in:** the `vector(1024)` column is coupled to `voyage-3-large`. A model change requires a re-embed + reindex migration and a dual-write window. Needs a documented re-embedding runbook.
+- **Embedding dimension lock-in:** the `vector(1024)` column is coupled to `voyage-3.5` (used for BOTH query and document embeddings per SR-09). A model change requires a re-embed + reindex migration and a dual-write window, and must move query and document embeddings together to keep the spaces identical. Needs a documented re-embedding runbook.
 - **Transcript retention vs. product value:** Free 7-day retention limits the "history" value prop but reduces sensitive-data liability. Confirm the retention tiers with legal/compliance and GTM.
 - **RLS performance overhead:** confirm the `current_setting` cast in RLS policies is planned efficiently on the hot `transcript_segments` path; benchmark vs. app-layer-only isolation.
 - **`usage_events` volume:** live sessions emit token/minute events at high frequency; validate that monthly partitioning + Redis pre-aggregation keeps write amplification and Stripe reporting within budget.

@@ -27,7 +27,7 @@ Every module — a desktop overlay screen, a Next.js route, a NestJS feature, a 
 1. **No single file over 700 LOC.** Enforced by an ESLint rule (`max-lines`, see §3). When a file approaches ~500 LOC, split proactively.
 2. **Pages/containers orchestrate; logic lives in hooks and utils.** A page component is a wiring diagram: it reads from hooks, passes props down, and lays out children. If a page has a `useMemo` with a 30-line transform, that transform belongs in `utils.ts` and the memo in a hook.
 3. **Components are presentational and focused.** A component that both fetches data and renders a table is two things — split the fetch into `use-*.ts`.
-4. **Strong TypeScript types; avoid `any`.** `any` is banned by lint (`@typescript-eslint/no-explicit-any: error`). Use `unknown` + narrowing, generics, or a proper type. `packages/types` is the single source of truth for cross-boundary DTOs and the release-manifest contract.
+4. **Strong TypeScript types; avoid `any`.** `any` is banned by lint (`@typescript-eslint/no-explicit-any: error`). Use `unknown` + narrowing, generics, or a proper type. `packages/types` is the shared home for cross-boundary types, but it is not hand-authored: **wire/API DTOs are _generated_ from the `api` Zod schemas (the source of truth) via a codegen step, and DB row types are _generated_ from the Drizzle schema** — a CI drift check (`turbo run codegen:check`) fails the build if committed types diverge. Reconciled per [decision record](04-decision-record.md) (A09).
 5. **Pure utils are unit-tested; hooks are integration-tested; components get component tests.** The split makes each layer independently testable (see §4).
 
 ### 1.2 Canonical folder shape
@@ -208,8 +208,8 @@ TypeScript everywhere, Node 22 LTS, `"module": "NodeNext"` for backend, bundler 
 **Rules:**
 
 - `any` is a lint **error**, not a warning. Escape hatches (`as unknown as T`, `@ts-expect-error`) require an inline comment justifying them and are flagged in review.
-- Cross-boundary types (API DTOs, IPC message contracts, the `latest.yml`/`latest-mac.yml` release manifest) live in `packages/types` and are imported by both producer and consumer. No duplicated interface definitions.
-- Runtime validation at every trust boundary uses **zod** schemas colocated with the DTO; `z.infer` derives the static type so the schema and type never drift.
+- Cross-boundary types (API/wire DTOs, IPC message contracts, the `latest.yml`/`latest-mac.yml` release manifest, DB row types) are consumed from `packages/types` by both producer and consumer. No duplicated interface definitions. The DTOs there are **generated, not hand-written**: the `api` Zod schemas are the source of truth and a codegen step emits their `z.infer` types into `packages/types` (consumed by `sdk`, `ws-gateway`, `entitlements`, and clients); DB row types are generated on a separate, non-overlapping axis from the Drizzle schema (see [Data model](30-data-model.md) §4). A CI drift check regenerates both and fails the build on divergence. Reconciled per [decision record](04-decision-record.md) (A09).
+- Runtime validation at every trust boundary uses **zod** schemas colocated with the DTO; `z.infer` derives the static type so the schema and type never drift — and, for API DTOs, this is the exact schema the `packages/types` codegen consumes.
 - Prefer discriminated unions over boolean flags and optional soup. Model impossible states out of existence.
 
 ---
@@ -357,6 +357,7 @@ flowchart LR
 | Gate | Command (per affected package) | Blocking |
 | --- | --- | --- |
 | Typecheck | `turbo run typecheck` (`tsc --noEmit`) | Yes |
+| DTO/DB codegen drift | `turbo run codegen:check` (regenerate `packages/types` from `api` Zod + Drizzle; fail on diff) | Yes (A09) |
 | Lint & format | `turbo run lint` + `prettier --check` | Yes |
 | Test + coverage | `turbo run test -- --coverage` | Yes (coverage floors) |
 | Contract | `turbo run test:contract` | Yes when a boundary changed |

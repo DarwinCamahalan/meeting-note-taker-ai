@@ -26,13 +26,13 @@ Configured in Stripe (Test + Live), managed as code via a seeding script (`packa
 | Cue Pro | `pro_annual` | year | $200.00 | recurring licensed | `STRIPE_PRICE_PRO_ANNUAL` |
 | Cue Team | `team_monthly` | month | $30.00 / seat | recurring licensed, `quantity`=seats | `STRIPE_PRICE_TEAM_MONTHLY` |
 | Cue Team | `team_annual` | year | $300.00 / seat | recurring licensed | `STRIPE_PRICE_TEAM_ANNUAL` |
-| Overage minutes | `overage_minutes` | month | $0.02 / min (illustrative) | **recurring metered**, `usage_type=metered`, `aggregate_usage=sum` | `STRIPE_PRICE_OVERAGE_MINUTES` |
+| Overage minutes | `overage_minutes` | month | $0.13 / min (canonical) | **recurring metered**, `usage_type=metered`, `aggregate_usage=sum` | `STRIPE_PRICE_OVERAGE_MINUTES` |
 | Cue Enterprise | `enterprise_custom` | custom | quote | recurring, negotiated | created per-deal |
 
 Notes:
 - **Annual = 2 months free** is baked into the annual amounts (10× monthly). No coupon needed.
 - The **metered overage price** is attached as a *second subscription item* on Pro/Team subscriptions, so a paid subscription has two items: the licensed base + the metered overage. Usage records report only billable (over-quota) minutes — see §7.
-- Overage rate ($0.02/min) is **illustrative**; the final number is owned by [Unit Economics](71-unit-economics.md) and must clear marginal COGS with margin.
+- Overage rate is a canonical **$0.13/min** (Reconciled per [decision record](04-decision-record.md) (F-01)) — chosen to preserve the intended ~10×-COGS margin defense (~9× the ~1.5¢/min live COGS) so heavy users past the cap stay profitable. It must still be validated against willingness-to-pay before Pro GA; the cost basis is owned by [Unit Economics](71-unit-economics.md).
 - Enterprise uses negotiated prices + invoicing (Stripe Invoicing / `collection_method=send_invoice`), not self-serve Checkout.
 
 ```ts
@@ -115,7 +115,7 @@ The Portal **configuration** (created once, referenced by ID) restricts which pr
 
 ## 5. Webhooks — the billing→entitlements bridge
 
-The `billing-webhooks` service is a small, hardened NestJS module (can run in the `api` container or standalone on ECS Fargate; standalone preferred for blast-radius isolation). It is the **only** writer to `entitlements` for billing-driven changes.
+`billing-webhooks` is a canonical logical service name but ships as a small, hardened NestJS module **inside `services/api` in v1** (own controller/route + Stripe raw-body signature verification), not a separately deployed Fargate service; it is extractable to a standalone `services/billing-webhooks` later when sustained webhook volume or processing latency warrants blast-radius isolation (Reconciled per [decision record](04-decision-record.md) (A02)). It is the **only** writer to `entitlements` for billing-driven changes.
 
 ### 5.1 Events handled
 
@@ -142,7 +142,7 @@ Every webhook request is:
 4. **Ordered defensively**: Stripe does not guarantee ordering, so every handler is written to be **order-independent** — it re-resolves state from the event's current object (e.g. `subscription.updated` carries the full current subscription), never applies a delta.
 
 ```ts
-// billing-webhooks: apps/api/src/billing/webhooks.controller.ts
+// billing-webhooks (module in services/api): services/api/src/billing/webhooks.controller.ts
 @Post('stripe')
 async handle(@Req() req: RawBodyRequest<Request>, @Headers('stripe-signature') sig: string) {
   let event: Stripe.Event;
@@ -321,7 +321,7 @@ sequenceDiagram
 
 ## 13. Open questions & risks
 
-- **Overage rate finalization**: $0.02/min is a placeholder; the real number is blocked on [Unit Economics](71-unit-economics.md) and must clear marginal COGS with margin before Pro GA.
+- **Overage rate finalization**: the canonical rate is **$0.13/min** (F-01); residual work is to validate it against willingness-to-pay and marginal COGS before Pro GA (it already clears the ~1.5¢/min live COGS by ~9×).
 - **Stripe Tax coverage**: confirm registration thresholds per jurisdiction (US states, EU OSS, UK VAT) before charging internationally; who owns the tax registration operationally?
 - **Grace-period length**: 7 days balances revenue recovery vs. goodwill; needs validation against observed recovery curves post-launch.
 - **Enterprise invoicing**: self-serve Checkout doesn't cover PO/net-30 invoicing; the Stripe Invoicing path for Enterprise is sketched but not fully specced (multi-year terms, custom quotas, DPA gating).

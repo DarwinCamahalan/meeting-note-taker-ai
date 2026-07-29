@@ -22,7 +22,7 @@ cue/
 ├── packages/
 │   ├── ui/                      # shared React components + design tokens
 │   ├── types/                   # shared DTOs + release-manifest contract
-│   ├── config/                  # eslint / ts / tailwind / zod env schemas
+│   ├── config/                  # eslint / tailwind / zod env schemas + tsconfig.base.json (single source of truth)
 │   ├── sdk/                     # typed API client (wraps `types`)
 │   └── core/                    # shared domain logic (errors, entitlements calc, prompt utils)
 ├── infra/
@@ -34,8 +34,8 @@ cue/
 ├── turbo.json                   # Turborepo pipeline
 ├── pnpm-workspace.yaml          # workspace globs
 ├── package.json                 # root scripts + devDependencies
-├── tsconfig.base.json           # shared TS compiler options
 └── .npmrc                       # pnpm settings (strict peer deps, etc.)
+# NB: the shared TS base config lives at packages/config/tsconfig.base.json (single source of truth) — no root tsconfig.base.json
 ```
 
 **Layering rule (enforced, see §4):** dependencies point *inward* — `apps/*` and `services/*` may depend on `packages/*`, but never on each other; `packages/*` may depend on other `packages/*` only along the allowed graph (`ui`, `sdk`, `core` → `types`, `config`).
@@ -58,7 +58,7 @@ packages:
 ```json
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": ["tsconfig.base.json", ".npmrc"],
+  "globalDependencies": ["packages/config/tsconfig.base.json", ".npmrc"],
   "globalEnv": ["NODE_ENV"],
   "tasks": {
     "build": {
@@ -122,31 +122,23 @@ Internal packages are referenced with the `workspace:*` protocol, e.g. `"@cue/ty
 
 ## 3. Shared TypeScript config
 
-### 3.1 `tsconfig.base.json`
+### 3.1 `packages/config/tsconfig.base.json` (single source of truth)
 
-```json
+There is exactly **one** shared TypeScript base config — `packages/config/tsconfig.base.json` — extended by every app, package, and service. There is **no** divergent root `tsconfig.base.json`. The authoritative strict-flag block lives in [Engineering standards §2](13-engineering-standards.md); it is the canonical definition and this doc does not duplicate it. Reconciled per [decision record](04-decision-record.md) (A05).
+
+```jsonc
+// packages/config/tsconfig.base.json — see Engineering standards §2 for the authoritative compilerOptions block
 {
   "compilerOptions": {
-    "target": "ES2023",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
-    "noImplicitOverride": true,
-    "verbatimModuleSyntax": true,
-    "isolatedModules": true,
-    "skipLibCheck": true,
-    "declaration": true,
-    "composite": true,
-    "resolveJsonModule": true,
-    "esModuleInterop": true
+    "exactOptionalPropertyTypes": true
+    // ...full canonical block in 13-engineering-standards.md §2
   }
 }
 ```
 
-`strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes` enforce the house rule of strong types / avoiding `any`. Each package/app has a thin `tsconfig.json` that extends this and sets `rootDir`/`outDir`. Node services add `"lib": ["ES2023"]` only (drop DOM). ESLint config in `packages/config` bans `any` (`@typescript-eslint/no-explicit-any`) and enforces the file-size and boundary rules (§4).
+`strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes` enforce the house rule of strong types / avoiding `any`. Each package/app has a thin `tsconfig.json` that extends this and sets its own per-project overrides (`module`/`moduleResolution`, `rootDir`/`outDir`, Node vs DOM `lib`); Node services drop the DOM libs. ESLint config in `packages/config` bans `any` (`@typescript-eslint/no-explicit-any`) and enforces the file-size and boundary rules (§4).
 
 ---
 
@@ -287,7 +279,7 @@ services/api/src/modules/sessions/
 └── sessions.service.spec.ts
 ```
 
-`ws-gateway` and `ai-orchestrator` are leaner (latency-critical): a `src/` with `handlers/`, `pipeline/` (STT → context-assembly → Claude), `providers/` (Deepgram/AssemblyAI/Claude/Voyage adapters), `types.ts`, and `utils.ts`. Service internals owned by [Backend services](20-backend-services.md) and [AI pipeline](21-ai-pipeline.md).
+`ai-orchestrator` is a **NestJS 11 application** like the other backend services, but bootstrapped in a **lean/standalone mode** for the hot path (DI, modules, typed providers, exception filter — no heavy HTTP middleware on the gRPC streaming path). Its `src/` uses NestJS modules with `pipeline/` (STT → context-assembly → Claude) and `providers/` (Deepgram/AssemblyAI/Claude/Voyage adapters), plus `types.ts` and `utils.ts`. `ws-gateway` is the **raw transport edge** (uWebSockets/ws adapter, not a full NestJS HTTP app) terminating client WebSockets and relaying to `ai-orchestrator` over gRPC bidi streaming. Service internals owned by [Backend services](20-backend-services.md) and [AI pipeline](21-ai-pipeline.md). Reconciled per [decision record](04-decision-record.md) (A04).
 
 ---
 
@@ -295,7 +287,7 @@ services/api/src/modules/sessions/
 
 - **Naming:** internal packages are `@cue/<name>`; deployables are unscoped folder names. Files use kebab-case except React components (PascalCase `.tsx`).
 - **Barrels:** each feature folder exposes a single `index.ts`; deep imports across features are lint-blocked.
-- **`billing-webhooks`:** in v1 it ships as a dedicated NestJS module inside `services/api` (its own route + Stripe signature verification), extractable into a standalone service if webhook volume warrants. Canonical service name is preserved in [System architecture](02-system-architecture.md) and [Payments](51-payments-stripe.md).
+- **`billing-webhooks`:** a canonical logical service name that in v1 ships as a dedicated NestJS module inside `services/api` (its own route + Stripe raw-body signature verification), extractable to a standalone `services/billing-webhooks` when **sustained webhook volume or processing latency** threatens the `api` deploy cadence/blast radius. Canonical service name is preserved in [System architecture](02-system-architecture.md) and [Payments](51-payments-stripe.md).
 - **Tests co-located** with source (`*.test.ts` / `*.spec.ts`); coverage gates in [Engineering standards](13-engineering-standards.md).
 - **Env validation:** every deployable validates `process.env` against a zod schema from `@cue/config` at boot; missing/invalid config fails fast.
 - **Migrations:** Drizzle Kit migrations live under `services/api/drizzle/` (single owner of schema); other services read via `@cue/core` repositories. Schema owned by [Data model](30-data-model.md).
@@ -304,7 +296,7 @@ services/api/src/modules/sessions/
 
 ## Open questions & risks
 
-- **billing-webhooks split timing.** Keeping it inside `api` simplifies v1 but couples webhook availability to BFF deploys; define the volume/latency threshold that triggers extraction to a standalone `services/billing-webhooks`.
+- **billing-webhooks split timing.** Keeping it inside `api` simplifies v1 but couples webhook availability to BFF deploys; the extraction trigger is **sustained webhook volume or processing latency** that threatens the `api` deploy cadence/blast radius (see [decision record](04-decision-record.md) A02) — the concrete volume/latency numbers still need to be set.
 - **Shared `@cue/core` bloat.** "Domain logic" can become a dumping ground. Needs a periodic boundary audit (owned by [Engineering standards](13-engineering-standards.md)) to keep it framework-agnostic and cohesive.
 - **Native module builds in CI.** Desktop native audio/content-protection modules must build for macOS + Windows runners; cross-compilation and signing secrets complicate the Turbo cache. Validate cache correctness for `desktop#package`.
 - **700-LOC rule vs. generated code.** Drizzle/OpenAPI-generated files can exceed 700 LOC; the lint rule must exempt generated dirs without becoming a loophole.

@@ -13,7 +13,7 @@ This is the authoritative high-level architecture for **Cue** (provisional brand
 3. **Stateless edges, stateful core.** `api`, `ws-gateway`, and `ai-orchestrator` are horizontally scalable and hold no durable state; all durable state lives in Postgres, Redis, and object storage.
 4. **BFF, not a monolith gateway.** `api` (NestJS) is a Backend-for-Frontend that both desktop and web talk to for CRUD, auth exchange, uploads, and entitlement checks. The realtime path deliberately bypasses it (see ADR-003).
 5. **Entitlements are the single source of truth for what a user may do.** Stripe → `billing-webhooks` → `entitlements` → cached gate. No service reads Stripe directly. See [Entitlements](50-subscriptions-entitlements.md).
-6. **Contracts before code.** All inter-service and client DTOs live in `packages/types`; the typed client lives in `packages/sdk`. See [Repository structure](03-repository-structure.md).
+6. **Contracts before code.** All inter-service and client DTOs live in `packages/types`; the typed client lives in `packages/sdk`. Wire/API DTOs in `packages/types` are **generated** from the `api` Zod schemas (the source of truth) via a codegen step and CI drift-checked; DB row types are generated from the Drizzle schema. See [Repository structure](03-repository-structure.md). Reconciled per [decision record](04-decision-record.md) (A09).
 
 ---
 
@@ -75,7 +75,7 @@ flowchart TB
     subgraph vpc["AWS VPC — ECS Fargate"]
         api["api<br/>NestJS BFF<br/>REST + tRPC-ish DTOs"]
         wsg["ws-gateway<br/>uWebSockets/ws<br/>realtime fan-in/out"]
-        aio["ai-orchestrator<br/>STT + context assembly<br/>+ Claude stream + RAG"]
+        aio["ai-orchestrator<br/>NestJS (lean bootstrap)<br/>STT + context assembly<br/>+ Claude stream + RAG"]
         ent["entitlements<br/>feature gates + usage meter"]
         bwh["billing-webhooks<br/>Stripe event sink"]
     end
@@ -107,7 +107,7 @@ flowchart TB
     api --> ent
     api <-->|OIDC/PKCE exchange| idp
 
-    wsg <-->|internal gRPC/WS| aio
+    wsg <-->|gRPC bidi stream (HTTP/2)| aio
     wsg --> redis
     aio --> stt
     aio --> claude
@@ -134,9 +134,9 @@ flowchart TB
 | `web` | Marketing site, 3D hero, download flow, account/billing portal launch | — | [11-web-landing.md](11-web-landing.md) |
 | `api` (NestJS BFF) | Auth exchange, CRUD (profile, sessions, history, uploads presign), entitlement reads, RAG doc ingestion trigger | Postgres, Redis, R2/S3 | [20-backend-services.md](20-backend-services.md) |
 | `ws-gateway` | Terminate client WebSocket, authenticate stream, backpressure, fan audio frames to `ai-orchestrator`, fan cues back | Redis (session, presence) | [20-backend-services.md](20-backend-services.md#ws-gateway) |
-| `ai-orchestrator` | STT streaming, VAD, context assembly (transcript + RAG + profile), Claude model routing + streaming, prompt caching, usage emission | Postgres/pgvector, Redis | [21-ai-pipeline.md](21-ai-pipeline.md) |
+| `ai-orchestrator` (NestJS, lean bootstrap) | STT streaming, VAD, context assembly (transcript + RAG + profile), Claude model routing + streaming, prompt caching, usage emission | Postgres/pgvector, Redis | [21-ai-pipeline.md](21-ai-pipeline.md) |
 | `entitlements` | Source of truth for feature gates & usage limits, minute/token metering | Postgres, Redis | [50-subscriptions-entitlements.md](50-subscriptions-entitlements.md) |
-| `billing-webhooks` | Ingest Stripe events idempotently, drive entitlement state transitions | Postgres | [51-payments-stripe.md](51-payments-stripe.md) |
+| `billing-webhooks` | Ingest Stripe events idempotently, drive entitlement state transitions. **v1: NestJS module inside `services/api`; canonical logical service name, extractable to a standalone service later at a stated trigger (sustained webhook volume/latency).** | Postgres | [51-payments-stripe.md](51-payments-stripe.md) |
 
 > Deployment topology, autoscaling, and multi-region placement (us-east-1 + eu-west-1 for residency) are owned by [DevOps/Infrastructure](60-devops-infrastructure.md) and [Scalability](70-scalability.md). This doc defines the logical containers only.
 
@@ -158,7 +158,7 @@ sequenceDiagram
 
     Note over D: Audio capture loop<br/>20ms PCM frames, Opus-encoded
     D->>G: WSS: audio frame (binary)  ~5–15ms network
-    G->>O: forward frame (internal WS/gRPC)  ~1–5ms
+    G->>O: forward frame (gRPC bidi stream)  ~1–5ms
     O->>S: stream audio (WebSocket)  ~10–20ms
     S-->>O: partial transcript  <300ms partial
     Note over O: VAD detects endpoint /<br/>semantic turn boundary
@@ -172,7 +172,7 @@ sequenceDiagram
 
     O->>C: streaming completion (cached prefix hit)  TTFT ~250–450ms
     C-->>O: token stream
-    O-->>G: cue tokens (backpressure-aware)  ~1–5ms/hop
+    O-->>G: cue tokens (gRPC bidi stream, backpressure-aware)  ~1–5ms
     G-->>D: cue tokens over WSS  ~5–15ms
     Note over D: First token painted in overlay<br/>p95 target: < 1.2s from utterance end
 
@@ -184,14 +184,17 @@ sequenceDiagram
 | Hop | Component | Target | Notes |
 |---|---|---|---|
 | Audio uplink | desktop → ws-gateway (WSS) | 5–15 ms | Opus frames, regional edge |
-| Internal forward | ws-gateway → ai-orchestrator | 1–5 ms | Same VPC/AZ affinity |
+| Internal forward (uplink) | ws-gateway → ai-orchestrator (gRPC bidi) | 1–5 ms | Same VPC/AZ affinity; Redis **not** on this path |
 | STT partial | Deepgram streaming | < 300 ms | Partial results, not final |
 | STT final segment | endpointing after utterance | 150–250 ms | VAD + Deepgram endpointing |
 | Entitlement check | cached in Redis | 1–3 ms | Cache miss → Postgres ~10ms |
 | Context assembly | RAG (pgvector) + profile + window | 20–60 ms | Prompt-cached stable prefix |
 | Claude TTFT | haiku-4-5 (live) / sonnet-5 | 250–450 ms | Cache hit lowers input cost + TTFT |
-| Cue downlink | ai-orchestrator → gateway → desktop | 6–20 ms | Streamed token-by-token |
+| Cue return (internal) | ai-orchestrator → ws-gateway (gRPC bidi) | 1–5 ms | Streamed token-by-token |
+| Cue return (downlink) | ws-gateway → desktop (WSS) | 5–15 ms | Streamed token-by-token |
 | **End-to-end p95** | **utterance end → first visible cue token** | **< 1.2 s** | Detailed budgeting owned by [AI pipeline](21-ai-pipeline.md#latency-budget) |
+
+> Transport, service placement, and the split return hop reconciled per [decision record](04-decision-record.md) (A01): the ws-gateway ↔ ai-orchestrator hop is gRPC bidirectional streaming; Redis holds only control state (admission/token-bucket, sessions, WS resume offsets, queues) and is never on the per-frame audio path.
 
 **Design consequences of the budget.**
 - Model routing defaults to **claude-haiku-4-5** for live cues (lowest TTFT); `sonnet-5` is used for higher-quality suggested answers where the user tolerates slightly more latency, and `opus-5` is reserved for asynchronous deep-prep/analysis. See ADR-005 and [AI pipeline](21-ai-pipeline.md#model-routing).
@@ -234,7 +237,7 @@ Every service inherits these. They are defined once here and referenced (not re-
 
 ### ADR-001 — Monorepo: pnpm workspaces + Turborepo
 - **Decision:** Single monorepo managed with pnpm workspaces and Turborepo, TypeScript everywhere, Node 22 LTS.
-- **Context:** Desktop, web, five backend services, and five shared packages share DTOs, the API client, design tokens, and domain logic. Cross-cutting contract changes must land atomically.
+- **Context:** Desktop, web, four deployable backend services in v1 (five logical — `billing-webhooks` ships as a module inside `services/api`), and five shared packages share DTOs, the API client, design tokens, and domain logic. Cross-cutting contract changes must land atomically.
 - **Alternatives considered:** Polyrepo per service (independent deploys, but painful contract versioning + duplicated tooling); Nx (heavier, more opinionated generators); Bazel (overkill, steep ramp).
 - **Trade-offs:** Monorepo gives atomic contract changes and one CI graph, at the cost of needing remote caching and careful task pipelining to keep CI fast. Turborepo's remote cache mitigates this.
 - **Consequence:** `packages/types` is the shared contract; Turbo pipeline enforces build/test ordering. Layout in [Repository structure](03-repository-structure.md).
@@ -252,6 +255,7 @@ Every service inherits these. They are defined once here and referenced (not re-
 - **Alternatives considered:** WebRTC datachannel (sub-100ms, NAT traversal, congestion control — but requires STUN/TURN infra, SFU or peer setup, and far more operational complexity for a client→server topology); gRPC streaming (great server-to-server, awkward from a browser/Electron renderer, needs grpc-web proxying); plain HTTP chunked/SSE (SSE is one-directional, unsuitable for continuous audio upload).
 - **Trade-offs:** WebSocket adds a few ms vs WebRTC and lacks built-in congestion control, but our path is client→server (no peer mesh), so WebRTC's strengths are largely wasted while its operational cost (TURN, ICE) is fully paid. WebSocket comfortably fits the latency budget in §4.1.
 - **Consequence:** `ws-gateway` runs on uWebSockets/ws for high connection density; audio is Opus-encoded to cut uplink bytes. WebRTC is revisited only if we later need peer-to-peer or in-browser capture without an app. Detail in [Backend services](20-backend-services.md#ws-gateway).
+- **Internal hop (server-to-server).** This ADR covers only the client ↔ `ws-gateway` edge (WSS). The `ws-gateway` ↔ `ai-orchestrator` hop — audio frames up, cue/transcript deltas down — uses **gRPC bidirectional streaming over HTTP/2** (typed, low-latency); Redis carries only control state (admission/token-bucket, sessions, WS resume offsets, queues), never per-frame audio. Reconciled per [decision record](04-decision-record.md) (A01).
 
 ### ADR-004 — STT provider: Deepgram primary, AssemblyAI fallback
 - **Decision:** Streaming STT via **Deepgram** with automatic failover to **AssemblyAI**.
