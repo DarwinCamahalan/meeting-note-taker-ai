@@ -4,7 +4,7 @@
 
 **Cue** (provisional brand) is a cross-platform (macOS + Windows) real-time AI meeting and interview copilot. It runs as a private, always-on-top, transparent teleprompter overlay that is excluded from screen capture and screen-share pickers using OS-level content-protection APIs. Cue captures both sides of a live conversation (system/loopback audio + microphone), transcribes it in under 300ms, and streams RAG-grounded AI cues, talking points, and live notes into the overlay — visible only to the user, at **< 1.2s end-to-end p95**. It targets interview preparation and confidence, sales/support copiloting, meeting note-taking, and accessibility.
 
-This directory is the canonical planning set: product definition, architecture, delivery plan, and five independent due-diligence audits. Everything here is a **Draft** planning artifact, not shipped software.
+This directory is the canonical planning set: product definition, architecture, delivery plan, and four independent due-diligence audits. Everything here is a **Draft** planning artifact, not shipped software.
 
 ---
 
@@ -15,9 +15,9 @@ This directory is the canonical planning set: product definition, architecture, 
 3. **Then [System Architecture](02-system-architecture.md)** for the authoritative C4 views, data flow, sequence diagrams, and ADRs.
 4. **Drill into the domain docs** that matter to your role — client (10–13), backend & AI (20–21), data & auth (30–40), monetization (50–51, 71), infra & ops (60–61, 70).
 5. **Read the [Roadmap](80-roadmap.md)** for the phase-gated delivery plan (Phase 0 spike → Phase 4 scale) and risk register.
-6. **Finish with the [Consolidated Audit Summary](audits/00-audit-summary.md)** — it is the single most important cross-cutting document before any build decision. The legal/consent items there are **gating**.
+6. **Finish with the [Consolidated Audit Summary](audits/00-audit-summary.md)** — it is the single most important cross-cutting document before any build decision.
 
-> Note: the audit's cross-doc contradictions (hot-path transport, service topology, contract sources of truth, embeddings, and pricing) have been reconciled — see the [Decision Record](04-decision-record.md) for the canonical resolutions.
+> Note: the audit's cross-doc contradictions (hot-path transport, service topology, contract sources of truth, embeddings, and pricing) have been reconciled — see the [Decision Record](04-decision-record.md) for the canonical resolutions. The audit's **non-legal** findings (security, scalability/reliability, financial, and architecture-quality) have since been addressed per the [Remediation Plan](05-remediation-plan.md). Legal/compliance is out of scope for the current planning pass.
 
 ---
 
@@ -32,6 +32,7 @@ This directory is the canonical planning set: product definition, architecture, 
 | [02-system-architecture.md](02-system-architecture.md) | Authoritative architecture: C4-ish views, data flow, live-cue sequence diagrams, and ADRs. |
 | [03-repository-structure.md](03-repository-structure.md) | pnpm + Turborepo monorepo layout, package boundaries, and layering conventions. |
 | [04-decision-record.md](04-decision-record.md) | Reconciliation decision log resolving the audit's cross-doc contradictions — canonical transport, service topology, contract sources of truth, embeddings, and pricing. |
+| [05-remediation-plan.md](05-remediation-plan.md) | Remediation program closing the audit's non-legal findings — two-budget latency + release gate, per-region capacity/DR/SLO reconciliation, envelope encryption + KMS, software supply-chain hardening, WS ticket hardening, and the rebuilt financial model. |
 
 ### Frontend & Client
 
@@ -79,12 +80,6 @@ This directory is the canonical planning set: product definition, architecture, 
 | [80-roadmap.md](80-roadmap.md) | Phase-gated delivery plan (Phase 0 → 4), exit criteria, milestone gantt, hiring plan, risk register, and GTM sketch. |
 | [CHANGELOG.md](CHANGELOG.md) | Keep-a-Changelog-style history of the planning/documentation set. |
 
-### Legal & Compliance
-
-| Doc | Description |
-|-----|-------------|
-| [90-legal-compliance.md](90-legal-compliance.md) | Authoritative compliance governance: jurisdictional recording-consent matrix, Acceptable-Use Policy, disclosed mode, DPA/sub-processor register, and data-subject-rights procedures. |
-
 ### Audits
 
 | Doc | Description |
@@ -94,7 +89,6 @@ This directory is the canonical planning set: product definition, architecture, 
 | [audits/02-scalability-reliability-audit.md](audits/02-scalability-reliability-audit.md) | Scalability & reliability: Redis hot path, capacity model, latency SLO, and DR posture. Score **68/100**. |
 | [audits/03-financial-profitability-audit.md](audits/03-financial-profitability-audit.md) | Unit economics & profitability: overage pricing, adverse selection, churn/LTV, and break-even. Score **58/100**. |
 | [audits/04-architecture-quality-audit.md](audits/04-architecture-quality-audit.md) | Architecture & code quality: hot-path transport, v1 scope contradictions, and contract sources of truth. Score **78/100**. |
-| [audits/05-legal-compliance-audit.md](audits/05-legal-compliance-audit.md) | Legal, compliance, privacy & responsible use: recording-consent law, GDPR, DPAs, and the AUP. Score **46/100**. |
 
 ---
 
@@ -132,6 +126,4 @@ This directory is the canonical planning set: product definition, architecture, 
 
 ## Responsible use & compliance
 
-> **⚠️ Gating before any production audio capture.** Cue captures the *other party's* voice. In all-party-consent jurisdictions (≈12 U.S. states and much of the EU) this can be a criminal wiretapping offense, and it creates GDPR obligations toward a non-consenting third party for which the current plan establishes no lawful basis. The authoritative governing document, [`90-legal-compliance.md`](90-legal-compliance.md) (jurisdictional consent matrix, Acceptable-Use Policy, DPA/sub-processor register, data-subject-rights procedures), **now exists as a draft scaffold** but the substantive gating work is not done: consent still defaults to the risky posture (`disclosed = false`), and DPAs with AI sub-processors are currently deferred to Phase 3 rather than Phase 1.
->
-> These are launch-blocking. Read the [Legal, Compliance, Privacy & Responsible-Use audit](audits/05-legal-compliance-audit.md) (score **46/100**) and the gating items in the [Audit Summary](audits/00-audit-summary.md#prioritized-remediation-roadmap) before committing to a build timeline.
+> Legal, compliance, and consent are **out of scope for the current planning pass**, and the dedicated legal docs have been removed from this set. Stated honestly: the underlying risk is real and unresolved — Cue captures the other party's voice, which carries recording-consent and GDPR exposure in all-party-consent jurisdictions (≈12 U.S. states and much of the EU). This must be formalized (consent model, disclosed mode, sub-processor DPAs) **before any production audio capture**. Prior legal analysis remains recoverable in git history.
