@@ -36,6 +36,7 @@ erDiagram
     ORGS ||--o{ AUDIT_LOGS : records
     USERS ||--o{ AUDIT_LOGS : actor_of
     USERS ||--o{ DEVICES : registers
+    ORGS ||--|| ORG_ENCRYPTION_KEYS : keyed_by
 
     ORGS {
         uuid id PK
@@ -60,7 +61,6 @@ erDiagram
         uuid org_id FK
         uuid user_id FK
         text role
-        timestamptz joined_at
     }
     SESSIONS {
         uuid id PK
@@ -68,18 +68,12 @@ erDiagram
         uuid user_id FK
         text mode
         text status
-        boolean disclosed
-        int duration_seconds
-        timestamptz started_at
-        timestamptz ended_at
     }
     TRANSCRIPTS {
         uuid id PK
         uuid session_id FK
         uuid org_id FK
-        text language
-        int segment_count
-        timestamptz created_at
+        text summary
     }
     TRANSCRIPT_SEGMENTS {
         uuid id PK
@@ -87,66 +81,51 @@ erDiagram
         uuid org_id FK
         text speaker
         text content
-        int start_ms
-        int end_ms
         boolean is_final
     }
     DOCUMENTS {
         uuid id PK
         uuid org_id FK
-        uuid user_id FK
         text kind
-        text title
         text storage_key
-        text status
-        timestamptz created_at
     }
     DOCUMENT_CHUNKS {
         uuid id PK
         uuid document_id FK
         uuid org_id FK
-        int chunk_index
         text content
         vector embedding
     }
     SUBSCRIPTIONS {
         uuid id PK
         uuid org_id FK
-        text stripe_subscription_id
-        text tier
-        text status
-        timestamptz current_period_end
     }
     ENTITLEMENTS {
         uuid id PK
         uuid org_id FK
-        text feature
-        jsonb limits
-        timestamptz updated_at
     }
     USAGE_EVENTS {
         uuid id PK
         uuid org_id FK
         uuid session_id FK
-        text kind
-        numeric quantity
-        text unit
-        timestamptz occurred_at
     }
     AUDIT_LOGS {
         uuid id PK
         uuid org_id FK
         uuid actor_user_id FK
-        text action
-        jsonb metadata
-        timestamptz created_at
     }
     DEVICES {
         uuid id PK
         uuid user_id FK
-        text platform
         text device_fingerprint UK
-        timestamptz last_seen_at
+    }
+    ORG_ENCRYPTION_KEYS {
+        uuid id PK
+        uuid org_id FK
+        bytea wrapped_dek
+        text kms_key_arn
+        int key_version
+        timestamptz rotated_at
     }
 ```
 
@@ -457,6 +436,36 @@ export const auditLogs = pgTable('audit_logs', {
 
 > Audit logs are **append-only and immutable at the app layer** (no update/delete grants for the app role) and monthly-partitioned. They are the compliance evidence trail for SOC 2 and for consent/disclosure events — retained 400 days regardless of user deletion of other data (legal basis: legitimate interest / legal obligation). See legal/compliance doc.
 
+### 3.7 Per-org encryption keys (envelope encryption)
+
+Each org gets a per-tenant **data key (DEK)** wrapped by a regional **AWS KMS CMK**; only the wrapped ciphertext is stored. The plaintext DEK exists only transiently in a service's memory after a `kms:Decrypt` and is cached briefly (see [§9.4](#94-envelope-encryption-launch-requirement)). This row is the addressing/rotation record — it never holds plaintext key material.
+
+```ts
+// packages/core/src/db/schema/encryption.ts
+import { customType, index, integer, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import { primaryId, timestamps } from './_shared';
+import { orgs } from './identity';
+
+// pgcrypto/raw bytes; the DEK is AES-256, wrapped (encrypted) by the KMS CMK.
+const bytea = customType<{ data: Buffer }>({ dataType: () => 'bytea' });
+
+export const orgEncryptionKeys = pgTable('org_encryption_keys', {
+  id: primaryId(),
+  orgId: uuid('org_id').notNull().references(() => orgs.id, { onDelete: 'cascade' }),
+  wrappedDek: bytea('wrapped_dek').notNull(),          // KMS-encrypted DEK ciphertext (never plaintext)
+  kmsKeyArn: text('kms_key_arn').notNull(),            // regional CMK that wrapped this DEK
+  keyVersion: integer('key_version').notNull().default(1),
+  rotatedAt: timestamp('rotated_at', { withTimezone: true }),
+  ...timestamps,
+}, (t) => ({
+  // One ACTIVE key per org; historical versions retained for decrypt-during-rotation.
+  orgVersionUk: unique('org_enc_keys_org_version_uk').on(t.orgId, t.keyVersion),
+  byOrg: index('org_enc_keys_org_idx').on(t.orgId),
+}));
+```
+
+> `key_version` supports **online key rotation** (see §9.4); ciphertext columns carry the tag so the right DEK is selected at decrypt time. The CMK is region-pinned to `data_region` — a US org's DEK is never wrapped by the EU CMK.
+
 ---
 
 ## 4. Derived types (single source of truth)
@@ -508,6 +517,8 @@ LIMIT :k;                          -- typically k = 8, then re-ranked to top 4
 ## 6. Redis usage map
 
 Redis (Upstash serverless in dev/small regions, ElastiCache in prod) carries everything ephemeral. **No durable customer data is authoritative in Redis** — it is cache, coordination, and queue only.
+
+> **Redis is reclassified as sensitive-data-bearing.** The interim transcript buffer (`sess:{sessionId}:interim`) and live session state carry transcript-derived content in the clear, so Redis is treated as a **Sensitive** store on par with `transcript_segments` — not as inert infrastructure. This drives the ElastiCache controls owned by [Authentication](40-authentication.md) §2.3 / [DevOps](60-devops-infrastructure.md) §2.3: **encryption in transit (TLS) + at rest + an AUTH token**, and internal service-to-service TLS via ECS Service Connect. Interim-buffer keys carry a **short TTL and are trimmed aggressively** (200 entries) so transcript content does not accumulate. _Addresses audit S-02 via [05-remediation-plan.md](05-remediation-plan.md)._
 
 | Purpose | Key pattern | Type | TTL / eviction | Notes |
 |---|---|---|---|---|
@@ -594,14 +605,17 @@ CREATE POLICY tenant_isolation ON transcript_segments
 | `users` (email, name) | Direct PII | Postgres | AES-256 (KMS) | Life of account | Erasure request → anonymize |
 | `devices.fingerprint` | Pseudonymous | Postgres | AES-256 | Life of device | Device revoke / account delete |
 | Raw audio | Sensitive | **Not stored** | n/a | 0 (in-flight only) | n/a |
-| `transcript_segments` | Sensitive (content) | Postgres | AES-256 | **Free 7d / Pro 90d / Team+ configurable** | `purge_after` sweep + erasure |
-| `documents` + source blobs | Sensitive | Postgres + R2 | AES-256 (SSE) | Until user deletes | Document delete / erasure |
-| `document_chunks.embedding` | Derived-sensitive | Postgres | AES-256 | Tied to parent document | Cascade on document delete |
-| `usage_events` | Pseudonymous | Postgres | AES-256 | 24 months (billing/tax) | Partition drop |
-| `audit_logs` | Metadata | Postgres | AES-256 | 400 days | Partition drop (survives account delete) |
-| `subscriptions`/`entitlements` | Pseudonymous | Postgres + Stripe | AES-256 | Life of account + legal hold | Anonymize on erasure |
+| `transcript_segments.content` | Sensitive (content) | Postgres | **Volume KMS + per-org envelope** | **Free 7d / Pro 90d / Team+ configurable** | `purge_after` sweep + erasure |
+| `transcripts.summary` / notes | Sensitive (content) | Postgres | **Volume KMS + per-org envelope** | Tied to parent session | `purge_after` sweep + erasure |
+| `documents` + source blobs | Sensitive | Postgres + R2 | Volume KMS + R2 SSE | Until user deletes | Document delete / erasure |
+| `document_chunks.content` | Sensitive (content) | Postgres | **Volume KMS + per-org envelope** | Tied to parent document | Cascade on document delete |
+| `document_chunks.embedding` | Derived-sensitive | Postgres | Volume KMS (vector NOT enveloped) | Tied to parent document | Cascade on document delete |
+| Redis interim buffer / session state | Sensitive (transcript-derived) | Redis | ElastiCache at-rest + in-transit + AUTH | TTL / trim (ephemeral) | TTL expiry |
+| `usage_events` | Pseudonymous | Postgres | Volume KMS | 24 months (billing/tax) | Partition drop |
+| `audit_logs` | Metadata | Postgres | Volume KMS | 400 days | Partition drop (survives account delete) |
+| `subscriptions`/`entitlements` | Pseudonymous | Postgres + Stripe | Volume KMS | Life of account + legal hold | Anonymize on erasure |
 
-Encryption at rest is provided by the managed provider's storage-level KMS encryption (Aurora/Neon volume encryption; R2 SSE). TLS 1.2+ in transit everywhere. Application-level envelope encryption for the most sensitive columns is a documented [Scalability](70-scalability.md)/security enhancement.
+Baseline encryption at rest is the managed provider's storage-level KMS encryption (Aurora/Neon volume encryption; R2 SSE) with TLS 1.2+ in transit everywhere. **On top of that, transcript/summary/chunk content is per-org envelope-encrypted at the application layer — a launch requirement, not a deferred enhancement (see [§9.4](#94-envelope-encryption-launch-requirement)).** _Addresses audit S-02 via [05-remediation-plan.md](05-remediation-plan.md)._
 
 ### 9.2 Retention enforcement
 
@@ -613,6 +627,24 @@ Encryption at rest is provided by the managed provider's storage-level KMS encry
 - **Right to erasure:** `gdpr-erase` cascades hard-deletes across tenant data, anonymizes `users` (email → `deleted+{id}@cue.invalid`, name nulled, `deleted_at` set), revokes devices, deletes R2 objects, and requests Stripe customer deletion. `audit_logs` and tax-relevant `usage_events` are retained under legal-obligation basis with the actor reference severed.
 - **Model-training opt-out:** `users.training_opt_out` defaults to **true** (we do not train on customer content by default) and is passed to the LLM/STT providers as a no-retention / no-training flag on every request — see [AI pipeline](21-ai-pipeline.md).
 - **Data residency:** `users.data_region` / `orgs.data_region` (`us`|`eu`) pin all durable rows and blobs to the matching regional stack. Cross-region access is not performed; the `eu-west-1` stack is a fully separate Postgres primary + R2 bucket. Region is chosen at signup and is not silently migrated.
+
+### 9.4 Envelope encryption (LAUNCH requirement)
+
+> **Decision (ADR-30.1): per-org application/envelope encryption of transcript content ships at launch.** The standing open question ("does transcript content warrant envelope encryption beyond volume KMS?") is resolved **yes, at launch** — not deferred to Scalability. Volume-level KMS alone protects against stolen disks/snapshots but not against a compromised DB role, a leaked logical backup, or one tenant's data being read via another's connection; a per-tenant DEK adds a cryptographic tenant boundary and bounds blast radius to a single org. _Addresses audit S-02 via [05-remediation-plan.md](05-remediation-plan.md); consistent with [04-decision-record.md](04-decision-record.md)._
+
+**Scheme (three layers):**
+
+1. **KMS CMK (root):** a regional AWS KMS Customer Master Key per `data_region`. Never leaves KMS; used only to wrap/unwrap DEKs via `kms:Encrypt` / `kms:Decrypt`.
+2. **Per-org DEK:** an AES-256 data key generated once per org (`kms:GenerateDataKey`), stored only as KMS-wrapped ciphertext in `org_encryption_keys.wrapped_dek` (§3.7). Unwrapped on demand and held in a short-TTL in-process cache (≤5 min) so the hot transcript-write path does not call KMS per segment.
+3. **Column ciphertext:** `transcript_segments.content`, `transcripts.summary`/notes, and `document_chunks.content` are AES-256-GCM encrypted with the org DEK before insert (AAD binds `org_id` + column + `key_version`). The existing `text` columns hold the compact `key_version:nonce:ciphertext` envelope (base64) — column types and all indexes unchanged; only the value's plaintext-vs-ciphertext contract changes at the app layer.
+
+- **NOT enveloped:** the `document_chunks.embedding` vector stays cleartext at the app layer (volume KMS only) — enveloping it would break the ANN index / cosine operator. Envelope the source **content**, not the vector; `voyage-3.5@1024` and all DDL/indexes are unchanged.
+- **Search/latency trade-off:** enveloped content is not SQL-searchable in the clear — acceptable because retrieval runs over the embedding index (§5) and full-text search over raw transcript content is not a launch feature.
+- **Rotation:** a new DEK bumps `key_version`; a background sweep re-encrypts under it, older versions staying decrypt-only until it drains. CMK rotation is handled by KMS independently.
+
+### 9.5 Logical backup encryption
+
+Logical backups (`pg_dump`) are **independently encrypted at the application layer with a key distinct from the Aurora volume/SSE key** — envelope-encrypted with a dedicated backup CMK before the dump artifact lands in object storage. A leaked or mis-permissioned volume snapshot or `pg_dump` file therefore cannot be read with the storage-layer key alone. Restore requires access to the backup CMK, which is granted separately from the live DB role.
 
 ---
 
@@ -633,9 +665,8 @@ export default {
 ```
 
 ```bash
-# Author a change (dev): edit schema/*.ts, then:
+# Author a change (dev): edit schema/*.ts, then generate + commit the emitted SQL:
 pnpm drizzle-kit generate --name add_session_disclosed_flag
-# Review the emitted SQL in packages/core/drizzle/NNNN_*.sql, commit it.
 # CI (staging → prod), gated in GitHub Actions:
 pnpm drizzle-kit migrate    # applies pending migrations transactionally
 ```
@@ -645,8 +676,7 @@ pnpm drizzle-kit migrate    # applies pending migrations transactionally
 ```sql
 -- 0000_bootstrap.sql
 CREATE EXTENSION IF NOT EXISTS vector;
--- uuidv7() shim (or CREATE EXTENSION pg_uuidv7 where available)
--- ... function body ...
+-- uuidv7() shim (or CREATE EXTENSION pg_uuidv7 where available) + function body
 
 -- 0007_chunks_hnsw.sql  (built after initial data load)
 CREATE INDEX CONCURRENTLY chunks_embedding_hnsw
@@ -660,10 +690,10 @@ CREATE INDEX CONCURRENTLY chunks_embedding_hnsw
 
 ## Open questions & risks
 
-- **HNSW at scale for large Enterprise KBs:** a single shared index with an `org_id` pre-filter may degrade recall/latency once a tenant's corpus is large. Decision point: move to per-tenant partial indexes or a partitioned `document_chunks` table. Owned jointly with [Scalability](70-scalability.md).
-- **Embedding dimension lock-in:** the `vector(1024)` column is coupled to `voyage-3.5` (used for BOTH query and document embeddings per SR-09). A model change requires a re-embed + reindex migration and a dual-write window, and must move query and document embeddings together to keep the spaces identical. Needs a documented re-embedding runbook.
-- **Transcript retention vs. product value:** Free 7-day retention limits the "history" value prop but reduces sensitive-data liability. Confirm the retention tiers with legal/compliance and GTM.
-- **RLS performance overhead:** confirm the `current_setting` cast in RLS policies is planned efficiently on the hot `transcript_segments` path; benchmark vs. app-layer-only isolation.
-- **`usage_events` volume:** live sessions emit token/minute events at high frequency; validate that monthly partitioning + Redis pre-aggregation keeps write amplification and Stripe reporting within budget.
-- **Application-level column encryption:** decide whether transcript content warrants envelope encryption beyond volume-level KMS, given the latency and searchability trade-offs.
-- **UUIDv7 availability:** confirm the managed provider (Neon vs. Aurora) permits the `pg_uuidv7` extension; otherwise the SQL-function shim is the fallback and must be perf-tested.
+- **HNSW at scale for large Enterprise KBs:** a single shared index with an `org_id` pre-filter may degrade recall/latency once a tenant's corpus is large. Decision point: per-tenant partial indexes or a partitioned `document_chunks` table. Owned jointly with [Scalability](70-scalability.md).
+- **Embedding dimension lock-in:** `vector(1024)` is coupled to `voyage-3.5` (query + document per SR-09). A model change needs a re-embed + reindex migration and a dual-write window moving both embeddings together; needs a documented re-embedding runbook.
+- **Transcript retention vs. product value:** Free 7-day retention limits the "history" value prop but reduces liability. Confirm tiers with legal/compliance and GTM.
+- **RLS performance overhead:** confirm the `current_setting` cast is planned efficiently on the hot `transcript_segments` path; benchmark vs. app-layer-only isolation.
+- **`usage_events` volume:** validate monthly partitioning + Redis pre-aggregation keeps write amplification and Stripe reporting within budget.
+- **Envelope-encryption cost:** **Resolved (ADR-30.1, §9.4): required at launch.** Residual risk — the per-org DEK unwrap adds a KMS `Decrypt` on cache miss on the write path; validate the ≤5-min DEK cache keeps p95 within the [Scalability](70-scalability.md) budget and that KMS quotas cover per-region peak org concurrency.
+- **UUIDv7 availability:** confirm the provider (Neon/Aurora) permits `pg_uuidv7`; else the SQL-function shim is the fallback and must be perf-tested.

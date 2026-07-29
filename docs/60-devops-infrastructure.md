@@ -262,7 +262,7 @@ flowchart LR
 
 ## 6. CI/CD — web & backend services
 
-All pipelines are **GitHub Actions**, orchestrated with **Turborepo** remote caching so only affected packages build. Branching, required checks, and merge rules are owned by [Engineering standards](13-engineering-standards.md); this section covers deployment.
+All pipelines are **GitHub Actions**, orchestrated with **Turborepo** remote caching so only affected packages build. Branching, required checks, and merge rules are owned by [Engineering standards](13-engineering-standards.md); this section covers deployment. Every pipeline below also runs the supply-chain gates (frozen lockfile, advisory + secret scans, SBOM, provenance, native-addon verification) defined in §11 — they are a precondition, not an afterthought, and gate whether the desktop app may auto-update.
 
 ### 6.1 Web (Next.js → Vercel)
 
@@ -317,12 +317,16 @@ flowchart TB
 
   WIN --> WSIGN["sign .exe/.blockmap<br/>EV cert OR Azure Trusted Signing"]
 
-  STAPLE --> PUB["electron-builder --publish<br/>upload artifacts + latest*.yml"]
-  WSIGN --> PUB
-  PUB --> R2["Cloudflare R2 (dl.cue.app)<br/>channel: alpha|beta|latest"]
+  STAPLE --> SC["supply-chain gate §11<br/>SBOM + SLSA provenance"]
+  WSIGN --> SC
+  SC --> PUB["electron-builder --publish<br/>upload artifacts + latest*.yml"]
+  PUB --> MSIG["minisign latest*.yml → latest*.yml.minisig<br/>(offline key, NOT R2/S3 creds) §7.7"]
+  MSIG --> R2["Cloudflare R2 (dl.cue.app)<br/>channel: alpha|beta|latest"]
   R2 --> ROLL["staged rollout<br/>stagingPercentage in yml"]
-  ROLL --> UPD["electron-updater clients"]
+  ROLL --> UPD["electron-updater clients<br/>verify minisig → sha512 → code-sig"]
 ```
+
+> The `electron-builder --publish` step and the `latest*.yml` object are only trustworthy once the supply-chain program (§11) is live and the manifest is independently signed (§7.7). Until then, `autoUpdater.autoDownload` stays **off** ([Desktop app §auto-update](10-desktop-app.md)).
 
 ### 7.1 Build matrix
 
@@ -381,7 +385,7 @@ Both sign the `.exe` **and** the `.blockmap`. We default to **Azure Trusted Sign
 
 - electron-builder `--publish` uploads installers + `latest.yml` (Win) and `latest-mac.yml` (macOS) to R2 under a channel prefix: `dl.cue.app/{alpha,beta,latest}/`.
 - `electron-updater` is configured with `provider: generic, url: https://dl.cue.app/latest` (channel selectable in-app for beta opt-in). The manifest contract (`latest*.yml` shape: version, path, sha512, size, releaseDate, and optional `stagingPercentage`) is typed in `packages/types` ([Repo structure](03-repository-structure.md)) and consumed by the web download route ([Web landing](11-web-landing.md)).
-- **Provenance:** every published `latest*.yml` carries the artifact `sha512`; `electron-updater` verifies it and the code signature before applying — a tampered R2 object cannot be installed.
+- **Integrity (layered):** every published `latest*.yml` carries the artifact `sha512`, which `electron-updater` verifies alongside the OS code signature before applying. But `sha512` alone is **insufficient** — the manifest and the hash it contains share R2's origin, so an attacker who can write to the bucket (or its credentials) can rewrite both the installer *and* its recorded hash. The manifest is therefore **independently signed** with an offline key whose custody is separate from R2/S3 (§7.7), and the client verifies that signature *first*. Native addon and dependency integrity is enforced upstream by the supply-chain program (§11).
 
 ### 7.6 Staged rollout
 
@@ -391,6 +395,34 @@ We ship gradually to catch regressions before 100% of users update:
 - Progression is manual/observed: hold at 10% for ~24h, watch [Sentry crash-free sessions + update-failure metrics](61-observability.md), then bump. A regression = set `stagingPercentage` back / re-publish the previous version as `latest` (rollback is a manifest edit + prior artifacts already on R2).
 - Channels: internal builds → `alpha`, opt-in testers → `beta`, GA → `latest`.
 
+### 7.7 Independent update-manifest signing (ADR-INF-05)
+
+The auto-update trust root cannot be R2 itself. After `--publish` uploads the artifacts and `latest*.yml`, a dedicated CI step signs each manifest with **minisign**, producing `latest*.yml.minisig` alongside it. The signing private key is held **outside** the R2/S3 credential boundary (see key custody below); a compromise of the R2 bucket or its write credentials therefore cannot forge a manifest the client will accept.
+
+- **Signing:** `minisign -Sm latest.yml -s <key>` (and `latest-mac.yml`) runs on the release runner, key injected from GitHub Actions secrets scoped to the `desktop-release` environment only. The `.minisig` files are uploaded to the same channel prefix.
+- **Client verification order** (enforced in the desktop client, [Desktop app §auto-update](10-desktop-app.md)): (1) verify `latest*.yml.minisig` against the **minisign public key pinned in the app binary**; reject if absent or invalid — *before* any hash or size is read from the manifest. (2) verify the artifact `sha512`/size from the now-trusted manifest. (3) verify the OS code signature (macOS notarization staple / Windows `publisherName` + `verifyUpdateCodeSignature`). Any failure aborts the update; there is no fallback path.
+- **Why minisign over TUF for v1:** a single pinned Ed25519 public key + detached signature is the minimum viable independent root and ships today with zero server infrastructure. A TUF-style role-separated feed (root/targets/snapshot/timestamp with key rotation and revocation) is the Phase-2 upgrade tracked in Open questions — the manifest contract already leaves room for it.
+
+**Key custody (distinct trust boundaries):**
+
+| Key | Purpose | Custody | Never used for |
+|---|---|---|---|
+| minisign manifest key | signs `latest*.yml` | offline-generated; private half in `desktop-release` GH environment secret (or KMS-wrapped, sealed); public half pinned in app binary + committed to repo | R2/S3 writes, code signing |
+| R2 write credentials | upload artifacts + manifest | `desktop-release` env, scoped to the `dl.cue.app` bucket | signing anything |
+| Apple / Azure code-signing keys | OS code signature | Apple keychain / Azure HSM (§7.2–7.4) | manifest signing |
+
+Because these three roots are independent, no single credential compromise yields an installable malicious update: forging the binary needs the OS signing key, forging the manifest needs the minisign key, and neither is the R2 credential.
+
+Addresses audit **S-01** (and the desktop-side of **S-04**) via [remediation plan](05-remediation-plan.md); tamper-rejection CI tests for a bad `.minisig`, a swapped installer (bad sha512), and a mis-signed binary are a release blocker owned by [Desktop app §auto-update](10-desktop-app.md) and [Engineering standards §5.2](13-engineering-standards.md).
+
+### 7.8 ADR-INF-05 — Independent minisign manifest signing, key custody split from R2
+
+- **Decision:** `latest*.yml` is signed with minisign using a key custodially separate from R2/S3 and OS code-signing keys; the client verifies the manifest signature before trusting any hash inside it.
+- **Context:** `electron-updater`'s default trust chain (sha512 in the manifest + code signature) collapses if the manifest and installer share one origin — whoever can write R2 can rewrite both. sha512 alone is not tamper-evidence when the hash lives next to the file it describes.
+- **Alternatives:** sha512-only (default — rejected, single origin); full TUF feed now (correct end state but heavy for v1 — deferred); reuse the code-signing key to sign the manifest (rejected — collapses two trust roots into one).
+- **Trade-offs:** one more key to custody and rotate; a lost minisign key forces a client update to re-pin. Accepted for a genuinely independent update root.
+- **Consequence:** `autoDownload` remains gated on §11 + this signature being live; the pinned public key is a release-blocking dependency; rotation requires shipping a new binary with the new key (documented runbook).
+
 ---
 
 ## 8. Secrets management
@@ -398,7 +430,7 @@ We ship gradually to catch regressions before 100% of users update:
 | Where | Contents | Rotation |
 |---|---|---|
 | **AWS Secrets Manager** (per region) | `DATABASE_URL`, `REDIS_URL`, `ANTHROPIC_API_KEY`, `DEEPGRAM_API_KEY`, `ASSEMBLYAI_API_KEY`, `VOYAGE_API_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, JWT signing keys, Clerk/WorkOS secrets | automatic rotation (Lambda) for DB creds; provider keys rotated quarterly via runbook |
-| **GitHub Actions secrets / OIDC** | signing certs (`APPLE_DEVELOPER_ID_P12`, `APPLE_API_KEY_P8`, Azure signing SP), Vercel token, Turbo cache token. **No AWS static keys** (OIDC). | on personnel change + annually |
+| **GitHub Actions secrets / OIDC** | signing certs (`APPLE_DEVELOPER_ID_P12`, `APPLE_API_KEY_P8`, Azure signing SP), `MINISIGN_SECRET_KEY` + passphrase (manifest signing, `desktop-release` env only — §7.7), R2 write credentials (separate scope), Vercel token, Turbo cache token. **No AWS static keys** (OIDC). | on personnel change + annually; minisign key rotation ships a new pinned public key |
 | **Vercel env** | web-side public + a few server-only (Stripe publishable, API base URL) | with GitHub |
 | **Desktop client** | *no shared secrets*. Uses OAuth PKCE (public client); user tokens live in the OS keychain (Electron `safeStorage`/keytar) — never in the bundle. See [Auth](40-authentication.md). |
 
@@ -448,6 +480,71 @@ Redis is explicitly **not** a source of truth; entitlement/session state can be 
 
 ---
 
+## 11. Software supply-chain program
+
+Everything Cue ships — backend images and, especially, the auto-updating desktop binary — is only as trustworthy as the pipeline that builds it. Because `electron-updater` can silently push a new binary to every user, an attacker who slips a malicious dependency, a leaked credential, or a tampered artifact into the build inherits our install base. This section defines the program that must be **live before `autoUpdater.autoDownload` is enabled** ([Desktop app §auto-update](10-desktop-app.md)); until then the desktop app checks for updates but requires an explicit user click, and the trust root (§7.7) is not yet complete.
+
+> **ADR-INF-06 — Supply-chain program gates `autoDownload`.**
+> - **Decision:** `autoDownload = false` until the six gates below plus independent manifest signing (§7.7) are enforced in CI and the desktop release pipeline. Enabling silent auto-update is a one-way trust decision and is treated as such.
+> - **Context:** silent auto-update turns any build-time compromise into a fleet-wide compromise. The existing pipeline signs and notarizes the binary but does nothing to attest *what went into it* or *that the manifest is authentic*.
+> - **Alternatives:** enable `autoDownload` now and add hardening later (rejected — the window between shipping auto-update and hardening it is exactly the exploitable gap); rely on OS code signing alone (rejected — code signing proves *who* built it, not that the inputs were clean or the manifest untampered).
+> - **Trade-offs:** slower path to hands-off updates; some gates add CI minutes.
+> - **Consequence:** the gates are hard merge/release blockers, not advisory; the desktop app defaults to click-to-update until sign-off.
+>
+> Addresses audit **S-01** via [remediation plan](05-remediation-plan.md); canonical transport/service decisions unchanged ([decision record](04-decision-record.md)).
+
+### 11.1 The gates, and where they slot into the pipeline
+
+| # | Gate | Tool | Enforced at | Fail action |
+|---|---|---|---|---|
+| 1 | **Frozen lockfile** | `pnpm install --frozen-lockfile` | every CI install (web §6.1, backend §6.2, desktop §7) | build fails if `pnpm-lock.yaml` would change |
+| 2 | **Dependency-advisory scan** | `pnpm audit` + `osv-scanner` (or GHSA/Dependabot) | PR merge gate | **fail on high/critical**; documented, expiring waiver for accepted risk |
+| 3 | **Secret scan** | `gitleaks` + `trufflehog` (verified-secrets mode) | PR merge gate + full-history scan nightly | fail on any detected live secret |
+| 4 | **CycloneDX SBOM** | `@cyclonedx/cyclonedx-npm` (JS) + Syft (container/binary) | release build (backend image tag, desktop tag §7) | release fails if SBOM cannot be generated; SBOM published as a release asset |
+| 5 | **SLSA-style build provenance** | GitHub OIDC attestations (`actions/attest-build-provenance`) | release build | release fails if attestation not produced; provenance binds artifact digest → commit → builder identity |
+| 6 | **Hash-pinned / verified native addons** | lockfile `integrity` (sha512) enforced; prebuilt native binaries verified against a checked-in allowlist of expected hashes | install + desktop build | fail if a native addon's fetched binary hash is not on the allowlist |
+
+Gates 1–3 are **PR merge blockers** (they run on every PR and protect `main`); gates 4–6 are **release blockers** (they run when a backend image is tagged or a `desktop-v*` tag triggers §7). The desktop pipeline additionally runs the tamper-rejection suite and the independent manifest-signing step (§7.7). These are the provisioning/keys half of the program; the merge-gate half (the exact CI job list and blocking semantics) is owned by [Engineering standards §5.2](13-engineering-standards.md) and cross-linked here — the two must stay reconciled.
+
+```mermaid
+flowchart LR
+  subgraph "PR merge gates (every PR)"
+    G1["pnpm --frozen-lockfile"]
+    G2["advisory scan<br/>fail high/critical"]
+    G3["gitleaks + trufflehog"]
+  end
+  subgraph "Release gates (tag / image build)"
+    G4["CycloneDX SBOM"]
+    G5["SLSA provenance attest"]
+    G6["native-addon hash verify"]
+  end
+  subgraph "Desktop release only (§7)"
+    T["tamper-rejection suite"]
+    M["minisign manifest §7.7"]
+  end
+  G1 --> G2 --> G3 --> MERGE(("merge to main"))
+  MERGE --> G4 --> G5 --> G6 --> ART(("signed artifact"))
+  ART --> T --> M --> GATE{"program live?"}
+  GATE -->|"yes"| AD["autoDownload allowed"]
+  GATE -->|"no"| CU["click-to-update only"]
+```
+
+### 11.2 Native addon integrity
+
+The desktop app links native modules (audio capture, `keytar`/`safeStorage`, content-protection shims — [Desktop app](10-desktop-app.md)). These fetch prebuilt binaries at install time, which is a classic supply-chain blind spot: the JS lockfile pins the package but not always the downloaded `.node`.
+
+- Prefer `node-gyp` **source builds** in CI where feasible, so the binary is produced from pinned source under provenance (gate 5) rather than downloaded.
+- Where a prebuilt binary is unavoidable, its sha512 is recorded in `desktop/native-addons.lock.json` (checked into the repo); the build fails if a fetched binary does not match. Updating an addon is a reviewed PR that changes the recorded hash.
+- `pnpm` `integrity` hashes are enforced (gate 1/6); `pnpm` config disallows lifecycle scripts for dependencies outside an explicit allowlist to blunt install-time script attacks.
+
+### 11.3 SBOM & provenance handling
+
+- One **CycloneDX** SBOM per release artifact (backend image and each desktop installer), attached as a release asset and retained with the artifact. Enables fast blast-radius answers when a new advisory lands ("are we shipping the vulnerable version, and in which release?").
+- **Provenance** is a signed in-toto/SLSA attestation generated by the trusted GitHub-hosted builder via OIDC, binding the artifact digest to the source commit and the workflow that built it. It is verifiable offline and is the machine-checkable answer to "did *our* pipeline build this exact byte sequence?".
+- SBOM + provenance travel with the artifact into R2 (desktop) / ECR (backend) so an auditor or an incident responder can reconstruct the chain from a deployed digest back to source. This complements, and does not replace, the independent manifest signature (§7.7).
+
+---
+
 ## Open questions & risks
 
 1. **Active-active vs warm-standby for non-EU DR.** Warm standby meets 60 min RTO but a stricter enterprise SLA (or a big region outage during peak) may force active-active — that roughly doubles data-tier cost and adds cross-region write-conflict complexity. Decision deferred to [Scalability](70-scalability.md); revisit at first enterprise SLA commitment.
@@ -456,3 +553,5 @@ Redis is explicitly **not** a source of truth; entitlement/session state can be 
 4. **Two clouds (AWS + Cloudflare R2) + Vercel + Azure signing.** Four control planes to secure and IaC. Justified by economics/DX, but raises the audit and secret-sprawl surface — consolidate into Terraform providers and document in the SOC 2 scope.
 5. **Windows arm64.** Deferred to Phase 2; verify WASAPI loopback + `SetWindowDisplayAffinity` parity on arm64 before committing a matrix target.
 6. **DB migration safety under blue-green.** Expand/contract discipline is a human process; a non-backward-compatible migration slipping through would break the BLUE fleet mid-deploy. Enforce with a CI migration-linter check ([Engineering standards](13-engineering-standards.md)).
+7. **minisign → TUF upgrade path (§7.7).** A single pinned minisign key has no in-band rotation or revocation: a compromised or lost signing key forces every client to update to re-pin a new key, and there is no timestamp/freshness role to defeat rollback/freeze attacks. Acceptable for v1; a TUF-style role-separated feed is the Phase-2 target — schedule it before the install base is large enough that a forced re-pin is operationally painful.
+8. **Supply-chain gate ownership split.** §11 owns provisioning + keys; [Engineering standards §5.2](13-engineering-standards.md) owns the CI job definitions and blocking semantics. These must not drift — a gate marked blocking in one doc but advisory in the other silently defeats the program. Reconcile on every change to either.
