@@ -7,9 +7,9 @@
 ## Git & delivery
 
 - **Single PR per body of work, many commits.** Group commits by domain (e.g. foundation, frontend, backend & AI, data/auth, monetization, infra & business, audits). One PR, one review thread, clean history.
-- **Base branch is `main`.** Feature/docs branches are cut from `main`.
-- **Auto-PR.** When a task is complete, create the branch, commit in logical chunks, push, and open the PR automatically — no per-action approval prompt, and don't paste the PR URL back. Confirm "PR opened" as a status line only.
-- **Never do these without explicit approval:** force-push, merge/rebase onto `origin/main`, delete remote branches, or close/merge a PR. Surface immediately if a hook pushes on our behalf.
+- **Branch model.** `main` is the stable/baseline branch; `dev` is the integration branch. Feature/docs branches are cut from `dev`, and PRs target `dev`. `dev` is promoted to `main` for releases.
+- **Auto git flow.** When a task is complete, run the whole flow automatically — create the branch, commit in logical chunks, **push, pull/sync, open the PR, and merge it** — with no per-action approval prompt and without pasting the PR URL back. Report short status lines only ("committed", "pushed", "PR opened", "merged", "dev updated").
+- **Still gated — ask first:** force-push, history rewrites (rebase that drops commits, amending already-pushed history), deleting remote branches, and hard resets that discard others' work. Surface immediately if a hook pushes on our behalf.
 - **Commit messages:** Conventional Commits (`docs:`, `feat:`, `fix:`, `chore:`, `refactor:`…), imperative, scoped.
 
 ## Communication

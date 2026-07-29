@@ -16,6 +16,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Compliance/legal deep-dive `90-legal-compliance.md` (acceptable-use policy, consent model, disclosed mode, jurisdictional recording-law matrix, DPA/sub-processor register) — flagged as a **gating** launch blocker by the [legal/compliance audit](audits/05-legal-compliance-audit.md) and the [audit summary](audits/00-audit-summary.md); currently only summarized in [01-product-vision.md](01-product-vision.md).
 
+## [0.2.0] - 2026-07-29
+
+### Added
+
+- **Decision record** ([04-decision-record.md](04-decision-record.md)) — ADR-style reconciliation log that resolves the cross-doc contradictions surfaced by the [architecture & code-quality audit](audits/04-architecture-quality-audit.md) and the [audit summary](audits/00-audit-summary.md).
+- **Legal & compliance governance doc** ([90-legal-compliance.md](90-legal-compliance.md)) scaffold — jurisdictional recording-consent matrix, Acceptable-Use Policy, disclosed mode, DPA/sub-processor register, and data-subject-rights procedures; previously tracked as a **gating** Pending item.
+
+### Changed
+
+- **Hot-path transport** reconciled to **gRPC bidirectional streaming** between `ws-gateway` and `ai-orchestrator` (replacing the contradictory per-frame descriptions).
+- **Service paths** made canonical as `services/api` (retiring stray `apps/api` references).
+- **`billing-webhooks`** is an **`api` module for v1** (not a standalone service) to match the v1 scope.
+- **`ai-orchestrator`** confirmed as a **NestJS** service, consistent with the rest of the backend.
+- **TypeScript config** consolidated to a **single `packages/config/tsconfig.base.json`** as the shared base.
+- **DTOs** are **code-generated from the `api` Zod schemas** — a single contract source of truth.
+- **Embeddings** pinned to **`voyage-3.5` at 1024 dimensions**.
+- **Overage pricing** made canonical at **$0.13/min**.
+- **Post-intro Sonnet base pricing** set to **$3 / $15 per Mtok** (input / output).
+
 ## [0.1.0] - 2026-07-29
 
 ### Added
@@ -45,5 +64,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   - Non-functional targets: live cue end-to-end latency < 1.2s p95, STT partials < 300ms, backend API p99 < 200ms (excluding LLM), 99.9% uptime, and overlay invisibility across Zoom/Meet/Teams/Webex on both OSes.
   - Responsible-use posture: acceptable-use policy, consent/compliance model, and a disclosed mode as launch-blocking requirements.
 
-[Unreleased]: https://example.com/cue/compare/v0.1.0...HEAD
+[Unreleased]: https://example.com/cue/compare/v0.2.0...HEAD
+[0.2.0]: https://example.com/cue/compare/v0.1.0...v0.2.0
 [0.1.0]: https://example.com/cue/releases/tag/v0.1.0

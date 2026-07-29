@@ -17,6 +17,8 @@ This directory is the canonical planning set: product definition, architecture, 
 5. **Read the [Roadmap](80-roadmap.md)** for the phase-gated delivery plan (Phase 0 spike → Phase 4 scale) and risk register.
 6. **Finish with the [Consolidated Audit Summary](audits/00-audit-summary.md)** — it is the single most important cross-cutting document before any build decision. The legal/consent items there are **gating**.
 
+> Note: the audit's cross-doc contradictions (hot-path transport, service topology, contract sources of truth, embeddings, and pricing) have been reconciled — see the [Decision Record](04-decision-record.md) for the canonical resolutions.
+
 ---
 
 ## Document index
@@ -29,6 +31,7 @@ This directory is the canonical planning set: product definition, architecture, 
 | [01-product-vision.md](01-product-vision.md) | Personas, use cases, jobs-to-be-done, scope, differentiation, and the responsible-use summary. |
 | [02-system-architecture.md](02-system-architecture.md) | Authoritative architecture: C4-ish views, data flow, live-cue sequence diagrams, and ADRs. |
 | [03-repository-structure.md](03-repository-structure.md) | pnpm + Turborepo monorepo layout, package boundaries, and layering conventions. |
+| [04-decision-record.md](04-decision-record.md) | Reconciliation decision log resolving the audit's cross-doc contradictions — canonical transport, service topology, contract sources of truth, embeddings, and pricing. |
 
 ### Frontend & Client
 
@@ -75,6 +78,12 @@ This directory is the canonical planning set: product definition, architecture, 
 |-----|-------------|
 | [80-roadmap.md](80-roadmap.md) | Phase-gated delivery plan (Phase 0 → 4), exit criteria, milestone gantt, hiring plan, risk register, and GTM sketch. |
 | [CHANGELOG.md](CHANGELOG.md) | Keep-a-Changelog-style history of the planning/documentation set. |
+
+### Legal & Compliance
+
+| Doc | Description |
+|-----|-------------|
+| [90-legal-compliance.md](90-legal-compliance.md) | Authoritative compliance governance: jurisdictional recording-consent matrix, Acceptable-Use Policy, disclosed mode, DPA/sub-processor register, and data-subject-rights procedures. |
 
 ### Audits
 
@@ -123,6 +132,6 @@ This directory is the canonical planning set: product definition, architecture, 
 
 ## Responsible use & compliance
 
-> **⚠️ Gating before any production audio capture.** Cue captures the *other party's* voice. In all-party-consent jurisdictions (≈12 U.S. states and much of the EU) this can be a criminal wiretapping offense, and it creates GDPR obligations toward a non-consenting third party for which the current plan establishes no lawful basis. The authoritative governing document, `90-legal-compliance.md` (jurisdictional consent matrix, Acceptable-Use Policy, DPA/sub-processor register, data-subject-rights procedures), **does not yet exist**. Consent defaults to the risky posture (`disclosed = false`), and DPAs with AI sub-processors are currently deferred to Phase 3 rather than Phase 1.
+> **⚠️ Gating before any production audio capture.** Cue captures the *other party's* voice. In all-party-consent jurisdictions (≈12 U.S. states and much of the EU) this can be a criminal wiretapping offense, and it creates GDPR obligations toward a non-consenting third party for which the current plan establishes no lawful basis. The authoritative governing document, [`90-legal-compliance.md`](90-legal-compliance.md) (jurisdictional consent matrix, Acceptable-Use Policy, DPA/sub-processor register, data-subject-rights procedures), **now exists as a draft scaffold** but the substantive gating work is not done: consent still defaults to the risky posture (`disclosed = false`), and DPAs with AI sub-processors are currently deferred to Phase 3 rather than Phase 1.
 >
 > These are launch-blocking. Read the [Legal, Compliance, Privacy & Responsible-Use audit](audits/05-legal-compliance-audit.md) (score **46/100**) and the gating items in the [Audit Summary](audits/00-audit-summary.md#prioritized-remediation-roadmap) before committing to a build timeline.
