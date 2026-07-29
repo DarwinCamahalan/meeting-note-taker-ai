@@ -2,13 +2,13 @@
 
 > Status: Draft · Owner: Principal Architect (AI/ML) · Last updated: 2026-07-29 · Related: [System architecture](02-system-architecture.md) · [Backend services](20-backend-services.md) · [Data model](30-data-model.md) · [Entitlements](50-subscriptions-entitlements.md) · [Unit economics](71-unit-economics.md) · [Observability](61-observability.md) · [Product vision](01-product-vision.md)
 
-This is the authoritative spec for **Cue**'s AI pipeline — the path from spoken audio to a glanceable cue in the overlay. It owns: the streaming topology (VAD → STT → context assembly → Claude → overlay), the sub-1.2s p95 latency budget, Claude model routing and prompt-cache strategy, the RAG retrieval design, prompt engineering for cues, cost-control levers, and AI safety/grounding. The service that runs all of this is **`ai-orchestrator`** (see [Backend services §ai-orchestrator](20-backend-services.md)); the transport into and out of it is **`ws-gateway`**. This doc does not re-derive per-user COGS — that math lives in [Unit economics](71-unit-economics.md); it does not define the DB schema — that lives in [Data model](30-data-model.md).
+This is the authoritative spec for **Cue**'s AI pipeline — the path from spoken audio to a glanceable cue in the overlay. It owns: the streaming topology (VAD → STT → context assembly → Claude → overlay), the two-budget latency model (server-controllable e2e p95 < ~900 ms SLO + full user-perceived e2e p95 < 1.2 s reported, §4), Claude model routing and prompt-cache strategy, the RAG retrieval design, prompt engineering for cues, cost-control levers, and AI safety/grounding. The service that runs all of this is **`ai-orchestrator`** (see [Backend services §ai-orchestrator](20-backend-services.md)); the transport into and out of it is **`ws-gateway`**. This doc does not re-derive per-user COGS — that math lives in [Unit economics](71-unit-economics.md); it does not define the DB schema — that lives in [Data model](30-data-model.md).
 
 ---
 
 ## 1. Design principles
 
-1. **Latency is the product.** The user glances at a cue mid-sentence. A correct cue that arrives 2s late is useless. Every hop is budgeted (§4) and every model/prompt choice is judged first on latency.
+1. **Latency is the product.** The user glances at a cue mid-sentence. A correct cue that arrives 2s late is useless. Latency is governed by **two budgets** from a single start point — end-of-utterance endpointing — a **server-controllable e2e p95 < ~900 ms** (the SLO) and a **full user-perceived e2e p95 < 1.2 s** (reported-only, client network excluded); see §4. Every model/prompt choice is judged first on latency.
 2. **Stream everything.** Partial STT transcripts, partial LLM tokens. Nothing waits for a final result when a partial is actionable.
 3. **Grounded or silent.** A cue is grounded in retrieved user context (resume, JD, knowledge base) and the live transcript, or it is suppressed. Cue never invents an employer, a metric, or a fact the user did not provide. See §8.
 4. **Cheap by default, deep on demand.** Live cues run on the cheapest model that clears the quality bar (Haiku 4.5). Sonnet 5 and Opus 5 are reserved for the moments that justify their cost (§5).
@@ -83,39 +83,56 @@ sequenceDiagram
   O->>C: messages.create(stream=true, cache_control on prefix)
   C-->>O: content_block_delta (token stream)
   O-->>G: cue tokens (gRPC bidi stream, downlink; framed, de-duplicated)
-  G-->>D: overlay renders cue incrementally
-  Note over D,C: p95 target: speech-final → first cue token < 1.2s
+  Note over G: ws-gateway EGRESS = trace split & end of SLO<br/>budget (a): speech_final → egress < ~900ms
+  G-->>D: overlay renders cue incrementally (client-network, excluded from SLO)
+  Note over D,C: t0 = speech_final. budget (a) SLO < ~900ms to egress;<br/>budget (b) reported < 1.2s to painted token (§4)
 ```
 
 The cue starts rendering on the **first** Claude token, not the last — the overlay paints incrementally so the user sees words appear within the budget even if the full cue takes longer to complete.
 
 ---
 
-## 4. Latency budget (p95, mic → first visible cue token)
+## 4. Latency budget — two budgets, one start point
 
-The SLO is **< 1.2s p95** from end-of-utterance to first cue token. STT partials must surface < 300ms. Budget below is measured from the audio frame that closes an utterance (Deepgram `speech_final`).
+We publish **two budgets**, not one summed number, and the **empirically measured e2e p95 (not the sum of the per-hop rows below) is the source of truth**. A sum of per-hop p95s overstates the true p95 (hops are correlated) and is not itself a valid p95 — the per-hop figures are design/attribution targets, and each budget's headline number is measured end-to-end in staging and prod.
 
-| Hop | Component | p50 | p95 | Notes |
-|-----|-----------|-----|-----|-------|
-| 1 | VAD gate + frame batching (desktop) | 20 ms | 40 ms | Silero VAD on 20ms frames; gates silence so we never pay STT for dead air |
-| 2 | Desktop → ws-gateway (WS uplink) | 15 ms | 45 ms | Region-pinned; user routed to nearest edge (us-east-1 / eu-west-1) |
-| 3 | ws-gateway → Deepgram + endpointing | 120 ms | 250 ms | Deepgram streaming, `endpointing=200`, `interim_results=true`; endpoint detection dominates |
-| 4 | Query embedding (Voyage `voyage-3.5`, 1024-dim — same model as document embeddings) | 30 ms | 70 ms | Single short query; cached per-utterance keyed on transcript hash; query and document embedding spaces are identical (SR-09) |
-| 5 | pgvector top-k retrieval | 8 ms | 25 ms | HNSW index; k=6; warmed connection pool |
-| 6 | Context assembly (prompt build) | 5 ms | 15 ms | Pure string assembly; cached prefix already resident |
-| 7 | Claude TTFT — Haiku 4.5 (cache hit) | 180 ms | 400 ms | Prompt-cache hit on prefix; thinking off; streaming |
-| 8 | Cue return (internal) ai-orchestrator → ws-gateway (gRPC bidi) | 2 ms | 5 ms | Typed cue frames over the HTTP/2 bidi stream; same-AZ (A01) |
-| 9 | Cue return (downlink) ws-gateway → desktop overlay (WSS) | 18 ms | 50 ms | Token framing + WS downlink + overlay paint |
-| | **Total (steady state, cache hit)** | **~400 ms** | **~900 ms** | Comfortably under 1.2s |
-| | **Total (cold: cache miss + retrieval miss)** | ~700 ms | ~1.15s | First request of a session; still within SLO |
+Both budgets start at the **same explicit point: end-of-utterance endpointing** — the audio frame that closes an utterance, Deepgram `speech_final`. STT partials must still surface < 300 ms for the transcript ribbon, but that is *before* t0 and is not in either budget.
 
-Reconciled per [decision record](04-decision-record.md) (A01 hot-path transport, SR-09 embedding model): the `ws-gateway`↔`ai-orchestrator` hop is gRPC bidirectional streaming (hops 2/8) — Redis is not on the per-frame audio path — and the query embedding uses the same `voyage-3.5` @ 1024-dim model as document ingest (hop 4).
+- **(a) Server-controllable e2e p95 < ~900 ms — the SLO.** Measured from endpointing to the **first cue token leaving `ws-gateway` egress**. This is what the team controls and the only latency the error budget is spent against.
+- **(b) Full user-perceived e2e p95 < 1.2 s — reported-only.** Measured from endpointing to the first cue token **painted in the overlay**. It adds the WS downlink + overlay paint, and the **client↔region network is measured separately** (client-side RUM) and **excluded from the SLO** — a slow client link cannot burn the server error budget.
+
+**Trace split = `ws-gateway` ingress/egress.** OpenTelemetry stamps a span boundary at ws-gateway ingress (audio in) and egress (first cue token out). Time on the client side of that boundary is client-network and attributed to budget (b) only; time on the server side is server-controllable and counts against budget (a). This is the client-vs-server attribution boundary that resolves the "who owns this millisecond" question. SLI/error-budget wiring is in [Observability](61-observability.md).
+
+| # | Hop / component | Segment | p50 | p95 | Notes |
+|-----|-----------|---------|-----|-----|-------|
+| — | VAD gate + frame batching (desktop) | *pre-t0 (client)* | 20 ms | 40 ms | Silero VAD on 20ms frames; before endpointing, not in either budget |
+| — | Desktop → ws-gateway (WS uplink) | *pre-t0 (client-network)* | 15 ms | 45 ms | Region-pinned; nearest edge (us-east-1 / eu-west-1); measured separately |
+| — | ws-gateway → Deepgram + endpointing | *defines t0* | 120 ms | 250 ms | Deepgram `endpointing=200`, `interim_results=true`; `speech_final` **is** the start point |
+| 4 | Query embedding (Voyage `voyage-3.5`, 1024-dim — same model as document embeddings) | server-controllable | 30 ms | 70 ms | Single short query; cached per-utterance on transcript hash; query/doc spaces identical (SR-09); usually pre-fetched off the critical path (see guardrails) |
+| 5 | pgvector top-k retrieval | server-controllable | 8 ms | 25 ms | HNSW index; k=6; warmed pool; org_id pre-filter recall validated in [Scalability](70-scalability.md) |
+| 6 | Context assembly (prompt build) | server-controllable | 5 ms | 15 ms | Pure string assembly; cached prefix already resident |
+| 7 | Claude TTFT — Haiku 4.5 | server-controllable | 180 ms | 400 ms | Prompt-cache **hit**; thinking off; streaming (cold prefix costs more — see below) |
+| 8 | Cue return (internal) ai-orchestrator → ws-gateway (gRPC bidi) | server-controllable | 2 ms | 5 ms | Typed cue frames over HTTP/2 bidi; same-AZ (A01) — **ws-gateway egress = end of budget (a)** |
+| **A** | **endpointing → first cue token at ws-gateway egress** | **budget (a) — SLO** | **~300 ms** | **< ~900 ms** | **Error-budgeted; measured e2e, not summed. Cold cues folded in (see below)** |
+| 9 | Cue return (downlink) ws-gateway → desktop overlay (WSS) + paint | client-network | 18 ms | 50 ms | Token framing + WS downlink + overlay paint; attributed to (b) only |
+| **B** | **endpointing → first cue token painted in overlay** | **budget (b) — reported** | **~350 ms** | **< 1.2 s** | **Reported-only; client tail measured separately via the ingress/egress split** |
+
+**Cold-cache cues are folded into the reported p95.** The first cue of a session pays a cold prompt-cache prefix (Claude TTFT rises to ~700 ms p95, hop 7) and possibly a cold pgvector/retrieval miss; those requests are **not excluded** from the published p95. Budgets (a) and (b) above are the **blended** figures across cold and warm cues — a session-opening cue still lands inside budget (a) on representative hardware, and cold cues cannot hide behind a warm-only average. The cold server-controllable path measures ~1.1–1.15 s p95 in the worst case and is the tail the [e2e release gate](13-engineering-standards.md) exercises.
+
+Reconciled per [decision record](04-decision-record.md) (A01 hot-path transport, SR-09 embedding model): the `ws-gateway`↔`ai-orchestrator` hop is gRPC bidirectional streaming (hop 8, and the uplink) — Redis is not on the per-frame audio path — and the query embedding uses the same `voyage-3.5` @ 1024-dim model as document ingest (hop 4).
+
+### 4.1 ADR — Two-budget latency SLO
+
+- **Decision:** the error-budgeted SLO is the **server-controllable e2e p95 < ~900 ms** (endpointing → ws-gateway egress); the **full user-perceived e2e p95 < 1.2 s** (endpointing → painted overlay token) is a reported-only companion. Both are measured e2e; neither is the sum of per-hop p95s.
+- **Context:** the previous "< 1.2 s p95" was computed by summing per-hop p95s — statistically invalid (overstates the tail, cannot be an SLI) — and it entangled a variable client↔region network the team cannot control into an SLO the team is held to. Cold-start cues were also being reasoned about separately from the reported number.
+- **Alternatives considered:** (a) keep a single 1.2 s summed budget — rejected, not a valid p95 and unownable; (b) SLO the full user-perceived number including client network — rejected, the client link is outside our control and would make the error budget hostage to end-user Wi-Fi.
+- **Consequence:** the ws-gateway ingress/egress span is the client-vs-server trace split; cold cues are folded into both reported p95s; the SLI/error budget lives in [Observability §SLO](61-observability.md) and an e2e latency **release gate** (utterance → painted-overlay token on representative staging hardware) blocks release on either budget in [Engineering standards](13-engineering-standards.md). Addresses audit **SR-03, SR-11, SR-14, A07** via [05-remediation-plan.md](05-remediation-plan.md).
 
 Budget guardrails:
 
-- **Retrieval is parallel to endpointing.** As soon as an interim transcript stabilizes, the orchestrator fires the embedding + pgvector query speculatively (steps 4–5), so by the time `speech_final` lands, retrieved chunks are usually already in hand. This overlaps ~95ms off the critical path.
-- **STT partials < 300ms** (step 3 interim) drive the transcript ribbon in the overlay independently of cues, so the user always sees live text even while a cue is being generated.
-- **TTFT, not total generation, is the SLO.** Cue completion may take 600–1500ms more; the user reads it as it streams.
+- **Retrieval is parallel to endpointing.** As soon as an interim transcript stabilizes, the orchestrator fires the embedding + pgvector query speculatively (hops 4–5) *before* t0, so by the time `speech_final` lands the retrieved chunks are usually already in hand — removing most of hops 4–5 from budget (a).
+- **STT partials < 300 ms** drive the transcript ribbon independently of cues, so the user always sees live text even while a cue is being generated (this is pre-t0 and not in either budget).
+- **TTFT, not total generation, is the SLO.** Cue completion may take 600–1500 ms more; the user reads it as it streams.
 
 ---
 

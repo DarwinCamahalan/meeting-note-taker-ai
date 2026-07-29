@@ -9,19 +9,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - **Master index & reading guide** ([docs/README.md](README.md)) — product summary, "how to read this" ordering, a categorized index of every doc with one-line descriptions, the canonical tech-stack table, the NFR targets, and a gating responsible-use/compliance callout.
-- **Five due-diligence audits** under [`docs/audits/`](audits/): [security](audits/01-security-audit.md) (72/100), [scalability & reliability](audits/02-scalability-reliability-audit.md) (68/100), [financial / unit economics](audits/03-financial-profitability-audit.md) (58/100), [architecture & code quality](audits/04-architecture-quality-audit.md) (78/100), and [legal / compliance](audits/05-legal-compliance-audit.md) (46/100).
+- **Five due-diligence audits** under [`docs/audits/`](audits/): [security](audits/01-security-audit.md) (72/100), [scalability & reliability](audits/02-scalability-reliability-audit.md) (68/100), [financial / unit economics](audits/03-financial-profitability-audit.md) (58/100), [architecture & code quality](audits/04-architecture-quality-audit.md) (78/100), and legal / compliance (46/100 — audit later removed as out of scope).
 - **Consolidated audit summary** ([docs/audits/00-audit-summary.md](audits/00-audit-summary.md)) — scorecard, merged severity-ranked findings across all five audits, and a single prioritized remediation roadmap (top ~12 actions tagged by roadmap phase, with the legal/consent items flagged as gating).
 
-### Pending
+### Removed
 
-- Compliance/legal deep-dive `90-legal-compliance.md` (acceptable-use policy, consent model, disclosed mode, jurisdictional recording-law matrix, DPA/sub-processor register) — flagged as a **gating** launch blocker by the [legal/compliance audit](audits/05-legal-compliance-audit.md) and the [audit summary](audits/00-audit-summary.md); currently only summarized in [01-product-vision.md](01-product-vision.md).
+- **Legal/compliance docs deprioritized** — removed `90-legal-compliance.md` and the legal/compliance audit (`audits/05-legal-compliance-audit.md`) as out of scope for the current pass. The underlying recording-consent / GDPR risk is unresolved and preserved in git history; revisit before any production audio capture.
+
+## [0.3.0] - 2026-07-29
+
+### Added
+
+- **Remediation plan** ([05-remediation-plan.md](05-remediation-plan.md)) — program that closes the audit's non-legal findings (security, scalability/reliability, financial, and architecture-quality), each with owner, roadmap phase, and concrete acceptance criteria.
+
+### Changed
+
+- **Latency SLO** rebuilt as a **two-budget model** (STT-partial budget vs. end-to-end cue budget), with the **< 1.2s p95** target enforced by an **end-to-end release gate** measured in CI rather than asserted.
+- **Capacity & reliability** reconciled: **per-region capacity model** (with `eu-west-1` as the second region), an explicit **DR posture reconciled against the 99.9% SLO**, and **pgvector recall validation** added to the load-test matrix.
+- **Data-at-rest security** hardened to **per-org envelope encryption** (per-tenant data keys under a KMS CMK), **KMS-backed JWT signing keys**, and **Redis reclassified as sensitive** (encrypted, access-scoped) rather than transient cache.
+- **Software supply-chain program** added — SBOM generation, dependency provenance, and signed build attestations — **gating Electron `autoDownload`** and requiring a **signed update manifest** before any auto-update is applied.
+- **WebSocket auth** hardened — the connection **ticket moved off the query string** to a header/subprotocol handshake to keep short-lived credentials out of logs and referrers.
+- **Financial model** rebuilt bottom-up — **persona-segmented margin, churn, and LTV**; **bottom-up opex and CAC**; and a **cash break-even** analysis replacing the prior top-down sketch.
 
 ## [0.2.0] - 2026-07-29
 
 ### Added
 
 - **Decision record** ([04-decision-record.md](04-decision-record.md)) — ADR-style reconciliation log that resolves the cross-doc contradictions surfaced by the [architecture & code-quality audit](audits/04-architecture-quality-audit.md) and the [audit summary](audits/00-audit-summary.md).
-- **Legal & compliance governance doc** ([90-legal-compliance.md](90-legal-compliance.md)) scaffold — jurisdictional recording-consent matrix, Acceptable-Use Policy, disclosed mode, DPA/sub-processor register, and data-subject-rights procedures; previously tracked as a **gating** Pending item.
+- **Legal & compliance governance doc** (`90-legal-compliance.md`) scaffold — jurisdictional recording-consent matrix, Acceptable-Use Policy, disclosed mode, DPA/sub-processor register, and data-subject-rights procedures; previously tracked as a **gating** Pending item. _(Removed in a later change — see [Unreleased].)_
 
 ### Changed
 
@@ -64,6 +79,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   - Non-functional targets: live cue end-to-end latency < 1.2s p95, STT partials < 300ms, backend API p99 < 200ms (excluding LLM), 99.9% uptime, and overlay invisibility across Zoom/Meet/Teams/Webex on both OSes.
   - Responsible-use posture: acceptable-use policy, consent/compliance model, and a disclosed mode as launch-blocking requirements.
 
-[Unreleased]: https://example.com/cue/compare/v0.2.0...HEAD
+[Unreleased]: https://example.com/cue/compare/v0.3.0...HEAD
+[0.3.0]: https://example.com/cue/compare/v0.2.0...v0.3.0
 [0.2.0]: https://example.com/cue/compare/v0.1.0...v0.2.0
 [0.1.0]: https://example.com/cue/releases/tag/v0.1.0

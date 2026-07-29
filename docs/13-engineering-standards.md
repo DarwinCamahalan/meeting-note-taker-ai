@@ -291,7 +291,22 @@ graph TD
 - Test files colocated: `utils.test.ts` beside `utils.ts`. E2E specs in `apps/*/e2e`.
 - Deterministic: inject clocks (`() => Date`), seed randomness, freeze time in tests. No network in unit/component tests.
 - **Content protection is verified in desktop E2E** by asserting `BrowserWindow.isContentProtected()` (macOS `NSWindowSharingType`, Windows `WDA_EXCLUDEFROMCAPTURE`) is set before any session starts — a release blocker if it regresses. See [Desktop app](10-desktop-app.md).
-- **Load-test gates:** a release cannot ship if the `ws-gateway` load run breaches the canonical p95 targets (cue end-to-end < 1.2s p95, STT partials < 300ms). See [Scalability](70-scalability.md) for the capacity model these runs validate.
+- **Load-test gates:** a release cannot ship if the `ws-gateway` load run breaches **either** canonical latency budget — server-controllable `cue_server_latency_ms` < **900 ms** p95 (endpointing→egress, the error-budgeted SLO) **and** full user-perceived `cue_latency_ms` < **1200 ms** p95 (endpointing→painted overlay token) — or STT partials < 300 ms. Cold-cache cues are included. The two budgets and their trace split are defined in [Observability §6/§9](61-observability.md) (ADR-61.1); see [Scalability](70-scalability.md) for the capacity model these runs validate.
+
+### 4.4 End-to-end latency release gate
+
+The k6/Artillery load gates above drive **synthetic audio through `ws-gateway`** — they validate the server slice but stop at egress and never paint a pixel. They cannot, on their own, certify the user-perceived budget. So we add a distinct **e2e latency release gate** that exercises the *full* `utterance → painted-overlay-token` path on real hardware.
+
+| Property | Value |
+| --- | --- |
+| What it measures | `cue_server_latency_ms` (endpointing→egress) **and** `cue_latency_ms` (endpointing→**painted overlay token**), from the same START (`stt.speech_final`) as prod, using the ingress/egress trace split |
+| Where | `staging`, against the live control plane in-region (client and region co-located so the *server* budget is not polluted by test-runner WAN) |
+| Hardware | **Representative** dedicated runners: a mid-tier macOS (Apple Silicon) and a mid-tier Windows laptop matching the desktop min-spec — not a headless cloud box, because overlay paint + content-protection compositing are OS-real costs |
+| Method | Scripted Playwright-for-Electron drives a recorded utterance corpus (incl. **cold-cache / cache-miss** first cues); the desktop stamps a monotonic *painted-token* timestamp echoed back so the client-network+paint leg is measured, not estimated |
+| Pass condition | `cue_server_latency_ms` p95 < 900 ms **and** `cue_latency_ms` p95 < 1200 ms across the corpus; **breach of either budget blocks the release** |
+| Wiring | Runs pre-release in CI on the self-hosted representative runners (§5.2), gating the desktop release tag alongside the content-protection matrix and the update tamper-rejection suite |
+
+> **ADR-13.1 — Latency is gated at two altitudes.** The synthetic k6 load run gates the *server* budget cheaply on every pre-release; the hardware e2e gate additionally gates the *full user-perceived* budget on representative macOS/Windows before a desktop tag ships. A green load run is necessary but **not sufficient** — the paint leg only exists in the e2e gate. Both budgets are defined once in [Observability §6/§9](61-observability.md); this gate is where CI enforces them. *Addresses audit A07, SR-03 via [05-remediation-plan.md](05-remediation-plan.md).*
 
 ---
 
@@ -363,8 +378,16 @@ flowchart LR
 | Contract | `turbo run test:contract` | Yes when a boundary changed |
 | Build | `turbo run build` (Next build, Vite build, Nest build, electron-builder dry pack) | Yes |
 | E2E smoke | `turbo run test:e2e -- --grep @smoke` | Yes |
-| Security | `pnpm audit --prod`, secret scan (gitleaks), CodeQL | Yes (high/critical) |
+| **Frozen lockfile** | `pnpm install --frozen-lockfile` (no CI-side lockfile mutation) | Yes |
+| **Dependency-advisory scan** | `pnpm audit --prod` + advisory DB scan | Yes (high/critical **fail**) |
+| **Secret scan** | `gitleaks` / `trufflehog` on the diff + full history on `main` | Yes (any finding **fails**) |
+| **SBOM generation** | CycloneDX SBOM emitted per build, attached to the artifact | Yes (must generate) |
+| Static analysis | CodeQL | Yes (high/critical) |
 | Load / full E2E | k6 + Artillery + full Playwright | Nightly/pre-release, not per-PR |
+| **e2e latency release gate** | hardware `utterance→painted-token` run (§4.4) | **Pre-release, blocks tag** (either budget breach) |
+| **Update tamper-rejection** | reject bad manifest signature / swapped installer / mis-signed binary | **Pre-release, blocks desktop tag** |
+
+The bold rows are the **merge-gate half of the software supply-chain program**; they catch problems at commit/PR time. Their heavier counterparts — **SLSA build provenance, independent update-manifest signing (minisign/TUF, key distinct from R2/S3), hash-pinned native addons, and signing-key provisioning** — plus the *provisioning* of the SBOM/scan tooling and the desktop release/update pipeline are owned by [DevOps & infrastructure §supply-chain](60-devops-infrastructure.md). `electron-updater autoDownload` must not be enabled until that program is live. *Addresses audit S-01, S-04 via [05-remediation-plan.md](05-remediation-plan.md).*
 
 Full DR, environment promotion, code signing, and the desktop release/update pipeline are owned by [DevOps & infrastructure](60-devops-infrastructure.md).
 
@@ -439,3 +462,5 @@ Logs ship to CloudWatch/Loki; errors to **Sentry** (desktop + web + backend); tr
 - **Contract-test ownership at the STT/LLM edge:** Deepgram/Anthropic are third parties we cannot run Pact against; we rely on recorded fixtures that can silently drift from live API behavior. Need a scheduled canary that hits real upstreams on staging.
 - **Squash-merge vs. bisectability:** squashing keeps `main` clean but coarsens `git bisect` for latency regressions in the audio→cue path. Open question whether critical perf changes should merge-commit instead.
 - **Enforcing "logic in hooks/utils" objectively:** the boundaries lint catches import direction but cannot measure "too much logic in a component." This stays partly a review judgment call — risk of inconsistent enforcement across teams.
+- **e2e latency gate runner fidelity + cost:** the §4.4 gate needs *representative* macOS/Windows self-hosted runners (headless cloud boxes mis-measure overlay paint). Shared with the desktop-E2E runner need above; risk of gate flakiness from clock-skew in the painted-token echo — mitigation is a monotonic client clock with server round-trip correction (see [Observability open-Q3](61-observability.md)).
+- **Supply-chain gate noise vs. velocity:** advisory + secret scans as hard high/critical gates can block on transitive-dep CVEs with no fix available; we need a time-boxed, reviewed allow-exception path (owned with [DevOps §supply-chain](60-devops-infrastructure.md)) that never silently downgrades a real finding.

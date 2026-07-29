@@ -16,7 +16,7 @@ This document consolidates the five independent due-diligence audits of the Cue 
 | [Security](01-security-audit.md) | **72 / 100** | Above-median security *design*, undermined by a missing supply-chain program for a code-signed auto-updater, transcript data protected only at the volume level, and ungoverned voice egress to STT vendors. |
 | [Scalability & Reliability](02-scalability-reliability-audit.md) | **68 / 100** | Right shape and honest risk register, undercut by a single regional Redis on the hot path, a capacity model sized on global (not per-region) demand, and an optimistic, inconsistently-measured latency SLO. |
 | [Financial / Unit Economics](03-financial-profitability-audit.md) | **58 / 100** | Correct token arithmetic on a business layer that rests on a 7.5× overage-rate contradiction, adverse selection into the loss-making tail, optimistic churn, and a placeholder break-even 2–3× too low. |
-| [Legal, Compliance & Responsible Use](05-legal-compliance-audit.md) | **46 / 100** | Thoughtful scaffolding around a potentially criminal core: capturing a non-consenting third party's audio, disclosure optional and defaulted off, with the authoritative legal document unwritten. |
+| Legal, Compliance & Responsible Use _(audit removed — out of scope)_ | **46 / 100** | Thoughtful scaffolding around a potentially criminal core: capturing a non-consenting third party's audio, disclosure optional and defaulted off, with the authoritative legal document unwritten. |
 
 ---
 

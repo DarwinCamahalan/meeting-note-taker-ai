@@ -8,7 +8,7 @@ This doc owns how we know **Cue** is healthy: the three pillars (logs, metrics, 
 
 ## 1. Principles
 
-1. **Latency is the SLO.** The product's reason to exist is a cue in the overlay in < 1.2s. Everything we instrument first answers "where did the 1.2s go?" (§6 latency decomposition).
+1. **Latency is the SLO — and it is two budgets, not one.** The product's reason to exist is a cue in the overlay fast. We refuse to publish a single summed e2e p95 (summing per-stage p95s overstates the achievable objective). Instead we error-budget the **server-controllable** slice — `cue_server_latency_ms` p95 < **900 ms**, measured from end-of-utterance endpointing to first cue token leaving `ws-gateway` egress — and *report only* the **full user-perceived** slice — `cue_latency_ms` p95 < **1200 ms**, which adds client uplink/downlink + overlay paint. Everything we instrument first answers "where did the budget go, and was it ours or the client network's?" (§6 latency decomposition, §9 SLO catalog).
 2. **One correlation ID from tap to overlay.** A single `sessionId` + per-utterance `turnId` threads desktop → `ws-gateway` → `ai-orchestrator` → STT/LLM and back. You can reconstruct any single cue's full journey.
 3. **Never log the content.** Transcripts, cue text, resume/JD/knowledge-base contents, audio, and PII are *never* in logs, metrics labels, traces, or analytics events. We log *shapes and durations*, not *substance* (§8).
 4. **Signals drive budgets, budgets drive priority.** SLIs feed error budgets; a burned budget changes what the team is allowed to ship ([DevOps §environments](60-devops-infrastructure.md)).
@@ -103,9 +103,10 @@ sequenceDiagram
 
 The starred rows are the ones on the top-line "is the product working" dashboard.
 
-| Metric | Type | Labels | Target (SLO) | Why |
+| Metric | Type | Labels | Target | Why |
 |---|---|---|---|---|
-| ⭐ `cue_latency_ms` (audio→visible cue) | histogram | region, model, tier | **p50 < 600 · p95 < 1200 · p99 < 2000** | the product SLO |
+| ⭐ `cue_server_latency_ms` (endpointing→ws-gateway egress) | histogram | region, model, tier | **p95 < 900** — the error-budgeted SLO | server-controllable slice; the only latency the SLO governs |
+| ⭐ `cue_latency_ms` (endpointing→painted overlay token) | histogram | region, model, tier | p50 < 600 · **p95 < 1200 · reported-only** | full user-perceived slice; client-network tail attributed, not error-budgeted |
 | ⭐ `stt_partial_lag_ms` | histogram | provider (deepgram/assembly) | p95 < 300 | STT partials feed responsiveness |
 | ⭐ `llm_ttft_ms` (time-to-first-token) | histogram | model | p95 < 500 | dominant contributor to cue latency |
 | `llm_tokens_per_sec` | gauge | model | > 40 | streaming smoothness |
@@ -124,6 +125,9 @@ The starred rows are the ones on the top-line "is the product working" dashboard
 
 - `minutes_consumed` and `llm_cost_usd` are **business** metrics but live here because reliability and cost are inseparable on the AI path; they reconcile against Stripe metering ([Payments](51-payments-stripe.md)) and the [cost model](71-unit-economics.md).
 - **Cardinality guard:** `userIdHash` is used only on counters aggregated server-side, never as a Prometheus label on high-frequency histograms (it would explode cardinality). Per-user rollups come from the events warehouse, not Prometheus.
+- **Both latency metrics share one start point:** end-of-utterance **endpointing** (Deepgram `speech_final`), timestamped at `ai-orchestrator` and stamped onto the `turnId`. `cue_server_latency_ms` stops at `ws-gateway` **egress** (first cue token leaves the socket); `cue_latency_ms` continues to the client's *painted-overlay-token* timestamp echoed back on the next frame. The difference between the two histograms **is** the client-network + paint tail (§6, §9). **Cold-cache (cache-miss) cues are folded into both reported p95s** — we never exclude the slow first cue of a session.
+
+> **ADR-61.1 — Two latency budgets, one error budget.** We error-budget `cue_server_latency_ms` (< 900 ms p95, endpointing→egress) because it is the only slice we control; we publish `cue_latency_ms` (< 1200 ms p95) for product truth but exclude it from the error budget so an SLO can never be burned by a user's home Wi-Fi. Aligns with [decision record](04-decision-record.md) latency budgets. *Addresses audit SR-03, SR-11, SR-14, A07 via [05-remediation-plan.md](05-remediation-plan.md).*
 
 ### 4.3 Dashboards (Grafana)
 
@@ -138,36 +142,55 @@ The starred rows are the ones on the top-line "is the product working" dashboard
 ## 5. Tracing
 
 - **OpenTelemetry** SDK in every Node service (auto-instrumentation for HTTP, Postgres/Drizzle, Redis, ws) plus **manual spans** on the AI path.
-- Spans on the critical path: `ws.frame.recv` → `vad.segment` → `stt.stream` → `context.assemble` (RAG retrieval + prompt build) → `llm.generate` (attrs: `model`, `tokens_in`, `tokens_out`, `cache_hit`, `ttft_ms`) → `cue.emit`. The **LLM and STT calls are explicit child spans** so a trace shows exactly how the 1.2s budget was spent.
+- Spans on the critical path: `ws.frame.recv` → `vad.segment` → `stt.stream` (emits the `stt.speech_final` event = the **endpointing start point** for both latency metrics) → `context.assemble` (RAG retrieval + prompt build) → `llm.generate` (attrs: `model`, `tokens_in`, `tokens_out`, `cache_hit`, `ttft_ms`) → `cue.emit` → `ws.egress.first_token`. The **LLM and STT calls are explicit child spans** so a trace shows exactly how the budget was spent.
+- **Client vs server attribution — the trace split.** Two span boundaries carry `attribution` resource attributes: `ws.frame.recv` (**ingress**) and `ws.egress.first_token` (**egress**). Everything *between* ingress-of-the-endpointed-turn and egress is `attribution=server` and rolls up to `cue_server_latency_ms`; the uplink before ingress and the downlink+paint after egress (reconstructed from the client's echoed paint timestamp) are `attribution=client-network` and appear only in `cue_latency_ms`. On-call reads the two tags to answer "was this our 900 ms or their network?" without guessing.
 - Exporter → **OTel Collector** (sidecar/daemon per cluster) → **Tempo**. Trace ↔ log ↔ metric correlation via shared `trace_id`.
 - **Sampling:** tail-based — keep 100% of traces where `cue_latency_ms > 1200` or any error, plus a 5% baseline of healthy traces. This keeps slow/broken cues fully observable without paying to store every healthy one.
 
 ```mermaid
 graph LR
-  A[ws.frame.recv] --> B[vad.segment]
-  B --> C[stt.stream<br/>Deepgram]
+  A["ws.frame.recv<br/>INGRESS (split)"] --> B[vad.segment]
+  B --> C["stt.stream<br/>Deepgram · speech_final = START"]
   C --> D[context.assemble<br/>RAG + prompt cache]
   D --> E[llm.generate<br/>Claude · ttft/tokens]
-  E --> F[cue.emit → overlay]
+  E --> F[cue.emit]
+  F --> G["ws.egress.first_token<br/>EGRESS (split) · server SLO stops here"]
+  G -.client network + paint<br/>attribution=client-network.-> H[overlay painted token]
+  classDef split fill:#0891b2,color:#fff;
+  class A,G split;
 ```
+
+`cue_server_latency_ms` = START (`speech_final`) → EGRESS. `cue_latency_ms` = START → overlay painted token (adds the dashed client leg).
 
 ---
 
 ## 6. Latency decomposition (the money view)
 
-The single most important operational artifact: the cue-latency budget, broken into spans so a p95 regression points at the offending stage. Aligns with [AI pipeline §latency-budget](21-ai-pipeline.md).
+The single most important operational artifact: the cue-latency budget, broken into spans so a p95 regression points at the offending stage. Aligns with [AI pipeline §latency-budget](21-ai-pipeline.md) and the two-budget model of §1 / ADR-61.1.
+
+**We do not sum per-stage p95s into an e2e p95** — that overstates the achievable objective (independent tails do not co-occur). The table below is a *diagnostic* decomposition (where did a given trace's time go), grouped by attribution. The **objective** is the measured end-to-end histogram of each budget, not the column sum.
+
+**Group A — client-network + paint (attribution=client-network, EXCLUDED from the SLO, present in `cue_latency_ms`):**
+
+| Stage | Indicative p95 | Span | Position |
+|---|---|---|---|
+| Desktop capture + encode + WS uplink | 120 ms | `ws.frame.recv` | before ingress |
+| VAD segmentation (client) | 40 ms | `vad.segment` | before START |
+| Downlink + overlay paint | 200 ms | client paint echo | after egress |
+
+**Group B — server-controllable (attribution=server, endpointing→egress, the `cue_server_latency_ms` SLO, p95 < 900 ms):**
 
 | Stage | Budget (p95) | Span | Alert if p95 > |
 |---|---|---|---|
-| Desktop capture + encode + WS send | 120 ms | `ws.frame.recv` | 200 ms |
-| VAD segmentation | 40 ms | `vad.segment` | 80 ms |
-| STT (final partial for the turn) | 300 ms | `stt.stream` | 400 ms |
-| Context assembly (RAG + prompt build, cached) | 120 ms | `context.assemble` | 250 ms |
+| Endpointing → context assembly (RAG + prompt build, cached *and* cold) | 150 ms | `context.assemble` | 250 ms |
 | LLM time-to-first-token | 450 ms | `llm.generate` (ttft) | 600 ms |
-| Emit + render in overlay | 100 ms | `cue.emit` | 200 ms |
-| **End-to-end** | **< 1200 ms** | full trace | **1200 ms** |
+| Cue emit + serialize + `ws-gateway` egress | 100 ms | `cue.emit` → `ws.egress.first_token` | 200 ms |
+| **Server-controllable e2e (SLO)** | **< 900 ms** | START→EGRESS (measured, not summed) | **900 ms** |
+| **Full user-perceived (reported)** | **< 1200 ms** | START→painted token (measured) | reported-only |
 
-A `cue_latency_ms` p95 breach auto-links the Grafana panel to the slowest-stage histogram so on-call sees *which* span blew the budget within seconds.
+The START point is `stt.speech_final` (end-of-utterance endpointing); the two split points are `ws.frame.recv` (ingress) and `ws.egress.first_token` (egress). **Cold-cache (cache-miss) cues are folded into both measured p95s** — the prompt-cache-miss first cue is counted, not excluded. A `cue_server_latency_ms` p95 breach auto-links the Grafana panel to the slowest Group-B stage histogram so on-call sees *which* span blew the 900 ms within seconds; a `cue_latency_ms`-only breach (server green, full red) points on-call straight at the client-network leg.
+
+*Addresses audit SR-03, SR-11, SR-14, A07 via [05-remediation-plan.md](05-remediation-plan.md).*
 
 ---
 
@@ -204,7 +227,8 @@ Tied directly to the [NFR targets](02-system-architecture.md). Windows are rolli
 
 | SLO | SLI (measurement) | Objective | Error budget (28d) |
 |---|---|---|---|
-| **Cue latency** | % of cues with `cue_latency_ms` < 1200 (excludes user-network-bound outliers) | 95% | 5% of cues |
+| **Cue server latency** *(error-budgeted)* | % of cues with `cue_server_latency_ms` < 900 — measured `stt.speech_final` → `ws.egress.first_token` (attribution=server), cold-cache cues included | 95% | 5% of cues |
+| **Cue full latency** *(reported-only, NOT error-budgeted)* | % of cues with `cue_latency_ms` < 1200 — START → painted overlay token; the client-network tail is attributed via the ingress/egress split, so this row informs but never burns budget | 95% (target) | n/a — reported, not gated |
 | **Cue availability** | % of started sessions that stream ≥1 cue without server error | 99.9% | ~40 min |
 | **API availability** | % `api` requests non-5xx | 99.9% | ~40 min |
 | **API latency** | % `api` requests < 200 ms p99 (excl. LLM) | 99% | 1% |
@@ -226,7 +250,7 @@ Tied directly to the [NFR targets](02-system-architecture.md). Windows are rolli
 | **P2** | Degradation: latency SLO burning fast, STT failover active, elevated 5xx, budget >50% | PagerDuty (business hours) + Slack | 30 min |
 | **P3** | Warnings: saturation nearing threshold, single-AZ blip, slow budget burn | Slack ticket | next day |
 
-- **Multi-window burn-rate alerts** (fast 1h + slow 6h windows) on the latency and availability SLOs — the standard Google SRE pattern — so we page on real budget threats, not on single noisy minutes.
+- **Multi-window burn-rate alerts** (fast 1h + slow 6h windows) on the **`cue_server_latency_ms`** SLO and the availability SLOs — the standard Google SRE pattern — so we page on real budget threats, not on single noisy minutes. `cue_latency_ms` (full, reported-only) drives a separate non-paging *client-degradation* dashboard signal; it never burns the error budget (§9, ADR-61.1).
 - Alerts are defined as code (Grafana Alerting provisioned via Terraform, [DevOps §4](60-devops-infrastructure.md)); every alert rule embeds a `runbook_url` annotation.
 
 ### 10.2 Representative runbooks (live in `docs/runbooks/`, Phase 1)
@@ -247,7 +271,7 @@ Tied directly to the [NFR targets](02-system-architecture.md). Windows are rolli
 
 1. **Cardinality vs granularity.** `sessionId`/`turnId` are invaluable for correlation but must stay out of Prometheus labels; the exact split between Prometheus (aggregate) and the events warehouse (per-session) needs load validation to avoid a metrics-cost blowout.
 2. **Tail sampling tuning.** Keeping 100% of >1200ms + errors plus 5% baseline is a starting point; under a latency incident this can spike Tempo ingest. Need a collector-side rate cap that never drops error/slow traces first.
-3. **Client-side latency attribution.** Part of `cue_latency_ms` is the user's own network (desktop→edge). We must separate server-controllable latency (SLO'd) from user-network latency (reported, not SLO'd) or the SLO becomes un-actionable — needs a clean split point in the trace at `ws.frame.recv`.
+3. **Client-side latency attribution — RESOLVED (ADR-61.1).** Server-controllable latency (`cue_server_latency_ms`, SLO'd) is now separated from user-network latency (folded only into the reported `cue_latency_ms`) via two trace split points: `ws.frame.recv` (ingress) and `ws.egress.first_token` (egress), carrying an `attribution` attribute (§5, §6). Residual risk: the client paint-timestamp echo must be trustworthy and clock-skew-corrected, else the client-network leg is mis-sized — needs a monotonic client clock + server round-trip correction, validated in the e2e release gate ([engineering standards §4.4](13-engineering-standards.md)). *Addresses audit SR-03, SR-11, SR-14, A07 via [05-remediation-plan.md](05-remediation-plan.md).*
 4. **Redaction completeness.** The denylist ESLint rule + SDK-level scrubbers are only as good as their field coverage; a new field name for transcript data could slip through. Mitigation: default-deny span/analytics attributes (allowlist), and a periodic telemetry-egress audit sampling real prod payloads in a secure enclave.
 5. **PostHog EU residency.** EU analytics must not leave region; verify PostHog project region-pinning and that feature-flag evaluation doesn't round-trip PII cross-region.
 6. **Cost of observability itself.** Loki + Tempo + Prometheus + PostHog + Sentry at scale is a real line item; needs its own budget alert and retention tuning so telemetry cost stays a small, known fraction of COGS ([Unit economics](71-unit-economics.md)).
