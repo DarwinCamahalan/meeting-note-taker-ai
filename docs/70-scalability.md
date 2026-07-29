@@ -1,6 +1,6 @@
 # Scalability & Resilience
 
-> Status: Draft · Owner: Principal Architect (Platform) · Last updated: 2026-07-29 · Related: [System architecture](02-system-architecture.md) · [Backend services](20-backend-services.md) · [AI pipeline](21-ai-pipeline.md) · [Data model](30-data-model.md) · [DevOps / infra](60-devops-infrastructure.md) · [Observability](61-observability.md) · [Unit economics](71-unit-economics.md)
+> Status: Draft · Owner: Principal Architect (Platform) · Last updated: 2026-07-29 · Related: [Decision record](04-decision-record.md) · [Remediation plan](05-remediation-plan.md) · [System architecture](02-system-architecture.md) · [Backend services](20-backend-services.md) · [AI pipeline](21-ai-pipeline.md) · [Data model](30-data-model.md) · [Authentication](40-authentication.md) · [DevOps / infra](60-devops-infrastructure.md) · [Observability](61-observability.md) · [Unit economics](71-unit-economics.md)
 
 This doc owns **how Cue stays fast and up as concurrent live sessions grow**. It identifies the five load-bearing bottlenecks, gives each a scaling strategy, derives a **capacity model** (assumptions → required `ws-gateway` instances, STT concurrency, LLM throughput), defines the **multi-region / data-residency** topology, and specifies the **resilience patterns** (circuit breakers, retries, graceful degradation, backpressure) and the **load-testing plan**.
 
@@ -79,7 +79,7 @@ flowchart LR
 **The problem.** Anthropic enforces per-org **RPM** (requests/min) and **TPM** (tokens/min) limits. At scale, thousands of concurrent sessions each firing ~4 cues/min (§3) can approach the account TPM/RPM ceiling, and a `429`/`529` on the hot path is a visible cue stall. Claude TTFT is also on the < 1.2s p95 budget.
 
 **Strategy.**
-- **Token-bucket admission control in `ai-orchestrator`.** A shared Redis token bucket tracks account-level RPM/TPM headroom; live-cue requests draw from it. When headroom is low, the orchestrator **sheds gracefully** before Anthropic returns a 429: shorten `max_tokens`, drop low-value cues (dedup harder), and only then queue.
+- **Token-bucket admission control in `ai-orchestrator`, per region.** A Redis token bucket tracks RPM/TPM headroom; live-cue requests draw from it. When headroom is low, the orchestrator **sheds gracefully** before Anthropic returns a 429: shorten `max_tokens`, drop low-value cues (dedup harder), and only then queue. The bucket is **genuinely regional** — see §4.4 and ADR-70.3: each region draws from its own admission budget (held in that region's control Redis, §2.6), not a shared global counter that silently overcommits one region against the other.
 - **Fallback model routing.** The router ([AI pipeline §5](21-ai-pipeline.md)) already prefers Haiku on the hot path. Under sustained rate pressure it can (a) keep cues on Haiku but reduce cue frequency, (b) never *escalate* to Sonnet/Opus on the live path, and (c) for async prep/summary work, **queue and defer** rather than compete with live traffic for the account TPM.
 - **Prompt caching cuts TPM pressure, not just cost.** The 2–8K cached prefix is billed and *counted* at ~0.1× ([AI pipeline §6](21-ai-pipeline.md)); caching therefore multiplies effective TPM headroom by keeping per-cue billed input small (§ Unit economics confirms the ~70% input reduction).
 - **Priority classes.** Live cues = P0 (never queued behind async). Prep/summary/grading = P1 (queued via BullMQ, can wait). This isolation means a burst of post-call summaries can never starve live cues of Claude quota.
@@ -93,7 +93,7 @@ flowchart LR
 - **RAG reads go to read replicas.** Embeddings are read-heavy and tolerate slight replica lag (a resume uploaded 2s ago need not be instantly searchable mid-call). `ai-orchestrator` routes vector search to an Aurora read replica; writes (embedding a new upload) go to the primary.
 - **HNSW index, tuned.** pgvector HNSW (`m=16, ef_construction=64`, query `ef_search` tuned for recall/latency) keeps ANN search sub-10ms per query at our chunk volumes ([Data model](30-data-model.md) owns the DDL). IVFFlat considered and rejected for the mixed insert/query pattern.
 - **Per-session retrieval cache.** RAG context for a session is assembled once and **cached in the prompt prefix** — it is not re-queried every cue. Only a materially new query intent triggers a fresh retrieval. This collapses per-session vector queries from "per cue" to a handful.
-- **Tenant-scoped queries always filter `user_id` first** (indexed) so the ANN scan is over one user's small chunk set, not the global corpus.
+- **Tenant-scoped queries pre-filter `org_id` first** (indexed) so the ANN scan is over one tenant's chunk set, not the global corpus. **But a filtered HNSW scan is not free of recall risk:** a `WHERE org_id = $1` predicate applied to a global HNSW graph can make the graph traversal walk mostly non-matching neighbors and return < k in-tenant hits at a given `ef_search`, silently dropping recall. We therefore treat filtered-HNSW recall as a **thing to measure, not assume** — see §2.7 (recall validation) and ADR-70.4, and the recall@k load-suite assertion in §8. Addresses audit **SR-07** via [05-remediation-plan.md](05-remediation-plan.md).
 
 ### 2.5 Postgres connections
 
@@ -105,15 +105,43 @@ flowchart LR
 - **Drizzle** connection pools sized *small per task* (e.g. `max: 5`) because PgBouncer does the real fan-in.
 - **Redis absorbs the hot path.** Sessions, presence, WS offsets, entitlement checks, and usage counters live in Redis ([Backend services §5](20-backend-services.md)), so the live path barely touches Postgres — the DB sees session finalize/flush, not per-cue traffic.
 
+### 2.6 Redis is two workloads, not one — split the clusters
+
+The doc previously treated "Redis" as a single dependency. It is not: two workloads with **different ops profiles, latency criticality, and failover tolerance** share the name, and co-locating them means a session-churn hotspot can stall the latency-critical admission path (and vice versa). We split them into two ElastiCache clusters per region.
+
+| Cluster | Owns | Ops profile | Latency criticality | Failover tolerance |
+|---|---|---|---|---|
+| **Control Redis** | Claude RPM/TPM token bucket, STT lease counters, per-tenant rate-limit counters, usage counters, entitlement-check cache | **low ops/sec, tiny values, hot-path on every cue** | Extreme — a stalled `INCR`/token draw delays or drops a cue | Must fail over fast; a few seconds of unavailability degrades admission (fail-open to bounded local budget, see below) |
+| **Session/stream Redis** | Session state, presence/heartbeat, WS sequence offsets (`resumeFrom`), BullMQ async queues (prep/summary/grading) | **higher ops/sec, session-lifecycle churn, off the per-cue path** | Moderate — resume/offset staleness is recoverable via client replay | Tolerates a short failover; BullMQ jobs are durable and retryable |
+
+- **Canonical audio invariant preserved.** Per [04-decision-record.md](04-decision-record.md) (gRPC bidi hot path, Redis OFF the per-frame audio path), **neither** cluster carries per-frame audio — audio frames stay in-process on `ws-gateway`/`ai-orchestrator` with gRPC/HTTP-2 flow control (§5.4). Redis carries session *metadata* and control counters only.
+- **Fail-open admission under control-Redis loss.** If control Redis is briefly unavailable, `ai-orchestrator` falls back to a **conservative per-instance local token budget** (a fraction of the regional bucket ÷ instance count) so cues keep flowing degraded rather than hanging — never fail-closed on the live path.
+- **Independent failover, independent chaos tests.** Each cluster is ElastiCache Multi-AZ with auto-failover; the §8 suite exercises failover of *each* cluster separately (closing the "shared Redis stall" risk previously only noted in §9.3).
+- Sensitivity/encryption controls for both clusters (encryption in transit + at rest + AUTH, reclassified as sensitive-data-bearing) are owned by [30-data-model.md](30-data-model.md) / [40-authentication.md](40-authentication.md); this doc owns only the *split and sizing*.
+
+> **ADR-70.2 — Split control Redis from session/stream Redis (per region).** *Decision:* run two ElastiCache clusters per region rather than one. *Why:* the admission-control token bucket is low-volume but latency-critical on every cue, while session/offset/BullMQ traffic is high-churn and only moderately latency-sensitive; sharing one cluster couples their failure modes and lets session churn evict or stall admission keys. *Trade-off:* two clusters per region ≈ +2 small nodes of cost per region — accepted; it is small against COGS and buys blast-radius isolation. Addresses audit **SR-05** via [05-remediation-plan.md](05-remediation-plan.md).
+
+### 2.7 Filtered-HNSW recall validation (not an assumption)
+
+Filtered ANN is the one retrieval correctness risk we cannot leave to "sub-10ms" latency claims. The plan:
+
+- **Measure recall@k under a realistic multi-tenant corpus**, not a single-tenant synthetic one: many `org_id`s of widely varying chunk counts (a few docs to tens of thousands), the smaller tenants being exactly where a global HNSW graph under an `org_id` pre-filter degrades.
+- **Ground truth = exact brute-force** cosine over the tenant's chunks (`SET enable_indexscan=off` / sequential `<=>`); recall@k = |HNSW top-k ∩ exact top-k| / k, asserted **≥ 0.95 at the production `ef_search`** across tenant-size buckets.
+- **Escalation ladder if recall dips** below target for selective tenants: (1) raise `ef_search`; (2) enable pgvector **iterative index scans** (`hnsw.iterative_scan`, 0.8.x) so the scan keeps walking until k in-tenant hits are found; (3) **per-tenant partial indexes** (`WHERE org_id = …`) for large tenants and/or **table partitioning by `org_id`-hash** so each tenant queries its own graph — planned before Growth (§3), not retrofitted after a recall incident.
+- Both **recall@k AND p99 latency** are asserted together in the load suite (§8) — a fix that restores recall by blowing latency is a failed fix.
+
+> **ADR-70.4 — Filtered-HNSW recall is a measured gate, with a per-tenant index path before Growth.** *Decision:* treat recall@k (≥ 0.95) under an `org_id` pre-filter as a first-class load-suite assertion, and commit to per-tenant partial/partitioned indexes before Growth scale rather than assuming a single global HNSW graph holds recall. *Why:* selective filters on a global HNSW graph are a known recall-degradation mode; silent low recall is a correctness bug that looks like "the AI is dumb," not an outage. *Trade-off:* per-tenant partial indexes add index-maintenance and planning complexity — deferred until the corpus and load-suite data justify the cut-over. Addresses audit **SR-07** via [05-remediation-plan.md](05-remediation-plan.md).
+
 ### Bottleneck summary
 
 | Bottleneck | Scaling lever | Protects | Lead time |
 |---|---|---|---|
 | `ws-gateway` connections | conn-scaled Fargate + ALB spread + Redis-held state | availability of live calls | minutes (autoscale) |
-| STT concurrency | leased pool @ 0.8× ceiling, 2-provider overflow | latency + cost | **weeks (contract)** |
-| Claude RPM/TPM | Redis token bucket + fallback routing + priority classes + caching | cue continuity | **weeks (contract)** |
-| pgvector load | read replicas + HNSW + prefix-cached RAG | API p99 | days |
+| STT concurrency | leased pool @ 0.8× ceiling, 2-provider overflow, **per-region** | latency + cost | **weeks (contract)** |
+| Claude RPM/TPM | **per-region** Redis token bucket + fallback routing + priority classes + caching | cue continuity | **weeks (contract)** |
+| pgvector load | read replicas + filtered HNSW + prefix-cached RAG + recall gate | API p99 + recall | days |
 | Postgres connections | PgBouncer + Aurora v2 + Redis hot path | whole DB | days |
+| Redis (split) | control vs session/stream clusters, per region, independent failover | admission + session state | days |
 
 ---
 
@@ -128,61 +156,109 @@ flowchart LR
 | A1 | Monthly active users (MAU) at "Growth" scale | 100,000 | planning scenario; see [Roadmap](80-roadmap.md) |
 | A2 | Avg live sessions / active user / week | 3 | interviews + sales calls + meetings |
 | A3 | Avg session length | 25 min | interview/sales-call norm |
-| A4 | Business-hours concentration (peak-to-average factor) | 6× | calls cluster in local business hours |
+| A4 | Business-hours concentration (peak-to-average factor), **blended global** | 6× | legacy global figure — superseded for sizing by A4r |
+| A4r | Business-hours concentration **within a single region** | **8×** | a single region has no cross-timezone smoothing, so its own peak-to-average is sharper than the blended global 6× |
 | A5 | Time-zone spread across our two regions | US + EU only in v1 | limits global smoothing |
+| A5s | **MAU split us-east-1 / eu-west-1** | **65% / 35%** | planning split; US-first GTM, EU for residency — validate against signup telemetry |
 | A6 | Cues generated per active session-minute | 4 | one per settled utterance ([AI pipeline §9](21-ai-pipeline.md)) |
 | A7 | Billed input tokens per cue (with caching) | ~440 | 400 fresh + 4,000 cached@0.1× ([Unit economics §3](71-unit-economics.md)) |
 | A8 | Output tokens per cue | ~120 | `max_tokens:160`, typical fill |
 
-### 3.2 Derived peak concurrency
+### 3.2 Derived peak concurrency — **per region, not a smoothed global peak**
+
+The original model derived one global peak (744 avg × 6 ≈ 4,500) and sized to it. That is **wrong for a two-region deployment**: `ws-gateway` tasks, STT leases, and Claude quota cannot be shared across `us-east-1` and `eu-west-1` (region-local live path, §4), and the two regions peak in their **own** business hours — so each region's fleet must be sized to **its own** business-hours peak, computed from **its own** MAU (A5s) and its own single-region peak factor (A4r), independently.
 
 ```
-Weekly session-minutes  = A1 × A2 × A3
-                        = 100,000 × 3 × 25          = 7,500,000 session-min / week
-Avg concurrent sessions = weekly-min / (7 days × 24h × 60min)
-                        = 7,500,000 / 10,080         ≈ 744 avg concurrent
-Peak concurrent (A4)    = 744 × 6                     ≈ 4,500 concurrent live sessions
+Per-region avg concurrent = (MAU_region × A2 × A3) / (7d × 24h × 60min)
+Per-region peak concurrent = avg × A4r          (A4r = 8×, single-region clustering)
+
+us-east-1 (65k MAU):  65,000 × 3 × 25 / 10,080 ≈ 484 avg  → × 8 ≈ 3,900 peak
+eu-west-1 (35k MAU):  35,000 × 3 × 25 / 10,080 ≈ 260 avg  → × 8 ≈ 2,100 peak
 ```
 
-**Planning target: ~4,500 concurrent live sessions at Growth scale (100k MAU).** We size to **2× that (9,000)** for burst headroom.
+**Key correction (SR-01/SR-04):** the two regional peaks **sum to ~6,000**, which is *larger* than the old smoothed global 4,500 — because the smoothed figure implicitly assumed US and EU load offsets and averages, which is exactly the assumption that under-provisions each region's own fleet. We size **each region to its own peak**:
 
-### 3.3 Required `ws-gateway` capacity
+| Region | MAU (A5s) | Avg concurrent | **Peak concurrent (A4r=8×)** | Sizing target (2× burst headroom) |
+|---|---|---|---|---|
+| us-east-1 | 65,000 | ≈ 484 | **≈ 3,900** | ~7,800 |
+| eu-west-1 | 35,000 | ≈ 260 | **≈ 2,100** | ~4,200 |
+| **Global (informational only)** | 100,000 | ≈ 744 | *not a sizing input* | — |
+
+The global row is retained only for cost/COGS aggregation ([Unit economics](71-unit-economics.md)); **it is never a capacity-sizing input.** Everything below (§3.3–3.6) is derived **per region**.
+
+### 3.3 Required `ws-gateway` capacity — **per region**
 
 | # | Assumption / derivation | Value |
 |---|---|---|
 | A9 | Sustainable active audio-relay connections per Fargate task (4 vCPU / 8 GB) | **2,500** (ESTIMATE — validate in §8; Opus audio relay + fan-out is I/O-light but CPU-bound on framing) |
-| — | Tasks for 9,000 peak @ 60% target utilization | `9,000 / (2,500 × 0.6)` = **6 tasks** |
-| — | + Multi-AZ / rolling-deploy headroom | round to **8–10 tasks** at Growth peak |
+| — | us-east-1 tasks for 7,800 sizing target @ 60% utilization | `7,800 / (2,500 × 0.6)` ≈ **6 tasks** → **8–10** with Multi-AZ + rolling-deploy headroom |
+| — | eu-west-1 tasks for 4,200 sizing target @ 60% utilization | `4,200 / (2,500 × 0.6)` ≈ **3 tasks** → **5–6** with Multi-AZ + rolling-deploy headroom |
 
-`ws-gateway` is cheap to scale — the binding constraint is not the gateway, it is the providers behind `ai-orchestrator`.
+Each region's fleet is sized independently to its own target; there is **no shared global gateway pool**. `ws-gateway` is cheap to scale — the binding constraint is not the gateway, it is the providers behind `ai-orchestrator`.
 
-### 3.4 Required STT concurrency
-
-```
-STT concurrent streams = peak concurrent sessions ≈ 4,500 (headroom target 9,000)
-```
-
-We must hold a **negotiated Deepgram concurrency ceiling ≥ 9,000 / 0.8 ≈ 11,250 streams** at Growth scale, split with AssemblyAI headroom for failover. **This is the hard external ceiling** — provisioned by contract, not autoscaling (§2.2).
-
-### 3.5 Required Claude throughput
+### 3.4 Required STT concurrency — **per region**
 
 ```
-Cues/min at peak      = 4,500 sessions × 4 cues/min          = 18,000 cues/min  → 18,000 RPM
-Input TPM (billed)    = 18,000 × 440 billed input tok        ≈ 7.9M input TPM
-Output TPM            = 18,000 × 120 output tok              ≈ 2.2M output TPM
+STT concurrent streams (region) = that region's peak concurrent sessions
+us-east-1: sizing target 7,800 → ceiling ≥ 7,800 / 0.8 ≈  9,750 streams
+eu-west-1: sizing target 4,200 → ceiling ≥ 4,200 / 0.8 ≈  5,250 streams
 ```
 
-At Growth peak we need Anthropic headroom of **~18k RPM and ~10M TPM (input+output) on Haiku**. Prompt caching is what makes this feasible — **without caching the billed input TPM would be ~10× higher** (4,400 vs 440 tok/cue) and both cost and TPM pressure would break (§ Unit economics). Async prep/summary (Sonnet/Opus) draws from a **separate, smaller quota** and is queued (P1), so it never competes with live cues.
+We hold a **negotiated Deepgram concurrency ceiling per region** (≈ 9,750 US / ≈ 5,250 EU at Growth), each split with AssemblyAI headroom for failover. **This is the hard external ceiling** — provisioned by contract, per region, not autoscaling (§2.2), and it is a **regional admission budget** (§2.6, §4.4), never a single global pool that lets one region borrow the other's leases.
 
-### 3.6 Scenario table
+### 3.5 Required Claude throughput — **per region**
 
-| Scenario | MAU [A1] | Peak concurrent | `ws-gateway` tasks | STT ceiling needed | Haiku input TPM |
-|---|---|---|---|---|---|
-| Launch | 5,000 | ~225 | 2 (min HA) | ~280 | ~0.4M |
-| Growth | 100,000 | ~4,500 | 8–10 | ~11,250 | ~7.9M |
-| Scale | 1,000,000 | ~45,000 | ~40 | ~112,500 | ~79M |
+```
+Cues/min (region)   = region peak concurrent × 4 cues/min
+Input TPM  (billed) = cues/min × 440 billed input tok
+Output TPM          = cues/min × 120 output tok
 
-At **Scale**, STT concurrency and Claude TPM are the real conversations (multi-account/enterprise commitments, possibly on-prem STT for Enterprise per canonical stack) — the compute tier stays trivially horizontal.
+us-east-1 (3,900 peak): 15,600 RPM → ≈ 6.9M input TPM + ≈ 1.9M output TPM
+eu-west-1 (2,100 peak):  8,400 RPM → ≈ 3.7M input TPM + ≈ 1.0M output TPM
+```
+
+Anthropic headroom is provisioned **per region** (≈ 15.6k RPM / ≈ 8.8M TPM US, ≈ 8.4k RPM / ≈ 4.7M TPM EU on Haiku). Prompt caching is what makes this feasible — **without caching the billed input TPM would be ~10× higher** (4,400 vs 440 tok/cue) and both cost and TPM pressure would break (§ Unit economics). Async prep/summary (Sonnet/Opus) draws from a **separate, smaller quota** and is queued (P1), so it never competes with live cues. Regionality of the Anthropic account is spelled out in §4.4 / ADR-70.3.
+
+### 3.6 Scenario table — **per region**
+
+| Scenario | Total MAU | Region | Region MAU (A5s) | Peak concurrent | `ws-gateway` tasks | STT ceiling | Haiku input TPM |
+|---|---|---|---|---|---|---|---|
+| Launch | 5,000 | us-east-1 | 3,250 | ~195 | 2 (min HA) | ~245 | ~0.34M |
+| Launch | 5,000 | eu-west-1 | 1,750 | ~105 | 2 (min HA) | ~130 | ~0.18M |
+| Growth | 100,000 | us-east-1 | 65,000 | ~3,900 | 8–10 | ~9,750 | ~6.9M |
+| Growth | 100,000 | eu-west-1 | 35,000 | ~2,100 | 5–6 | ~5,250 | ~3.7M |
+| Scale | 1,000,000 | us-east-1 | 650,000 | ~39,000 | ~34 | ~97,500 | ~69M |
+| Scale | 1,000,000 | eu-west-1 | 350,000 | ~21,000 | ~18 | ~52,500 | ~37M |
+
+At **Scale**, STT concurrency and Claude TPM are the real conversations **in each region** (multi-account/enterprise commitments per region, possibly on-prem STT for Enterprise per canonical stack) — the compute tier stays trivially horizontal.
+
+> **ADR-70.1 — Size each region to its own business-hours peak, never a smoothed global peak.** *Decision:* derive capacity per region from that region's MAU (A5s) and single-region peak factor (A4r=8×); the global peak is informational only. *Why:* live-path resources are region-pinned (§4) and the two regions peak at different local times, so a smoothed global figure under-provisions both. *Trade-off:* sum-of-regional-peaks (~6,000) > smoothed global (~4,500) means we provision ~33% more nominal capacity than the naive model — accepted; it is the honest number and the alternative silently drops calls at regional peak. Addresses audit **SR-01, SR-04** via [05-remediation-plan.md](05-remediation-plan.md).
+
+### 3.7 Redis ops/sec model — per scenario, per cluster
+
+Sizing the two clusters from §2.6. Per-session ops rates are ESTIMATES to be validated in §8.
+
+| Source | Op | Rate / active session | Cluster |
+|---|---|---|---|
+| Presence / heartbeat | `SET`+TTL | ~1 / s | session/stream |
+| WS seq offset (`resumeFrom`) | `SET` | ~2 / s (transcript+cue frames) | session/stream |
+| BullMQ async enqueue/ack | mixed | ~0.2 / s (amortized) | session/stream |
+| Claude token draw | `EVAL` (bucket) | ~0.067 / s (4 cues/min) | control |
+| Usage + rate-limit counters | `INCR` | ~0.13 / s (~2 / cue) | control |
+| STT lease acquire/release | `EVAL` | negligible steady (2 / session lifetime) | control |
+
+```
+session/stream ≈ 3.2 ops/s/session   control ≈ 0.2 ops/s/session
+```
+
+| Scenario | Region | Peak sessions | **Session/stream Redis ops/s** | **Control Redis ops/s** |
+|---|---|---|---|---|
+| Growth | us-east-1 | 3,900 | ≈ 12,500 | ≈ 780 |
+| Growth | eu-west-1 | 2,100 | ≈ 6,700 | ≈ 420 |
+| Scale | us-east-1 | 39,000 | ≈ 125,000 | ≈ 7,800 |
+| Scale | eu-west-1 | 21,000 | ≈ 67,000 | ≈ 4,200 |
+
+**Read:** session/stream Redis is ~16× the ops volume but latency-tolerant; control Redis is low-volume but on every cue's critical path — which is exactly why they are split (§2.6). At Growth a single-shard ElastiCache node handles either comfortably; the model exists to catch when **session/stream** crosses into cluster-mode sharding (well before Scale), while **control** stays single-shard far longer. The throughput + failover of both clusters is asserted in the §8 load suite. Addresses audit **SR-05** via [05-remediation-plan.md](05-remediation-plan.md).
 
 ---
 
@@ -215,6 +291,40 @@ flowchart TB
 - **Global vs regional data.** Global (no residency concern): installers, `latest.yml` update feeds, marketing site, release manifest — served from CloudFront/R2 with global reach. Regional: everything user-scoped.
 - **Failover posture (v1): in-region HA across AZs, not cross-region user failover.** A full-region outage degrades that region's users (documented DR RTO in [DevOps §DR](60-devops-infrastructure.md)); we do **not** silently fail EU users over to US because that would violate residency. Cross-region DR for the control plane (auth, entitlements metadata) is warm-standby; user-data DR is snapshot/restore within region.
 - **Provider regionality.** Deepgram/AssemblyAI and Anthropic endpoints are selected per region where regional endpoints exist; where they do not, the DPA + sub-processor disclosure covers the transfer ([Legal/compliance] via [Product vision](01-product-vision.md)).
+
+### 4.4 Regional admission control (Anthropic + STT)
+
+The §2.2/§2.3 admission controls are only meaningful if the **budget they meter is genuinely regional**. A single global token bucket over a single shared Anthropic org would let `us-east-1`'s business-hours peak silently exhaust the quota that `eu-west-1` is counting on hours later — the two regions would fight over one counter and neither's SLO would hold.
+
+We take an explicit position (ADR-70.3): **separate provider accounts/keys per region** is the primary mechanism, with a real cross-region global bucket as the only acceptable alternative.
+
+| Provider | Regional admission mechanism |
+|---|---|
+| **Anthropic (Claude)** | Distinct Anthropic org/API key per region (`cue-us`, `cue-eu`), each with its own contracted RPM/TPM (§3.5). Each region's control-Redis token bucket meters **only its own org's** headroom. No cross-region key sharing. |
+| **Deepgram / AssemblyAI** | Per-region concurrency ceiling (§3.4) metered by that region's control-Redis lease counters. Failover between Deepgram↔AssemblyAI stays **within region**. |
+
+- **If a shared org is ever forced** (e.g. contract can't split), the fallback is a **real cross-region global token bucket** — a single authoritative counter (one region's control Redis, cross-region-replicated, or a dedicated global limiter service) that both regions draw from atomically — **never** two independent local buckets each assuming the full quota. Two independent buckets over one shared quota is the specific anti-pattern this ADR forbids.
+- The §8 **429/529-storm test runs against both regions** and asserts that saturating one region's budget does **not** degrade the other's cue flow.
+
+> **ADR-70.3 — Provider admission budgets are per-region (separate orgs/keys), or a single global bucket — never independent local buckets over a shared quota.** *Decision:* provision a distinct Anthropic org and distinct STT concurrency contract per region and meter each in that region's control Redis. *Why:* the two regions peak at different local times and must each hold their own SLO; a shared quota with independent local counters overcommits and produces cross-region 429 contention that is invisible until peak. *Trade-off:* two provider orgs = duplicated onboarding/minimums — accepted; it is the only way regional admission control is real. Addresses audit **SR-02, SR-06** via [05-remediation-plan.md](05-remediation-plan.md).
+
+### 4.5 Availability SLO vs DR posture — reconciled
+
+The published target is **99.9% monthly = 43.2 min/month** error budget. That number has to survive contact with the failover and DR realities, which we quantify here (values are ESTIMATES to validate in GameDays, §8; canonical DR wiring in [DevOps §DR](60-devops-infrastructure.md)).
+
+| Event | Scope | RTO (recovery) | RPO (data loss) | Error-budget impact |
+|---|---|---|---|---|
+| Aurora Serverless v2 writer failover (Multi-AZ) | in-region | ~30–60 s | 0 (sync standby) | ~1 min/event; a few/month fits the budget |
+| ElastiCache Multi-AZ failover (either cluster) | in-region | ~15–30 s | ≤ seconds (control counters are reconstructable; sessions replay) | fail-open admission (§2.6) blunts user impact |
+| Single-AZ loss | in-region | seconds (tasks + DB already span ≥2 AZ) | 0 | within budget |
+| **Full-region loss** | whole region's users | **DR-restore RTO = hours (snapshot/PITR restore)** | **RPO ≤ 5 min** (continuous backup) | **one event blows the 43.2 min budget entirely** |
+
+**The tension:** in-region AZ-level HA can hold 99.9%, but a **full-region outage cannot** be recovered inside 43.2 minutes with a snapshot/restore DR posture — and we deliberately do **not** fail EU users over to US (region pinning, §4). Two honest options; we take a position rather than publishing a number the DR posture can't back:
+
+- **Option A — lower/scope the published SLO.** Publish 99.9% only for events *up to and including single-AZ loss*, and state full-region loss as a separate, lower availability tier bounded by DR RTO.
+- **Option B — fund an in-region hot standby for the live control plane** so the region survives a broader (non-total) fault without a DR restore.
+
+> **ADR-70.5 — Scope the 99.9% SLO to in-region faults AND fund an in-region hot standby for the live control plane.** *Decision:* (1) provision each region with Multi-AZ Aurora (sync standby, auto-failover) + Multi-AZ ElastiCache for **both** clusters + `ws-gateway`/`api`/`ai-orchestrator` spread across ≥2 AZ, so single-AZ and single-node faults are survived inside the 43.2 min budget; **and** (2) explicitly **scope the published 99.9% to in-region availability**, documenting full-region loss as a distinct tier governed by DR RTO (hours) / RPO (≤5 min), not covered by the 99.9% number. *Why:* residency forbids cross-region user failover, so a total-region SLA at 99.9% would be a promise the architecture cannot keep; scoping it is honest and the hot standby earns the 99.9% for everything short of total-region loss. *Trade-off:* we do **not** buy cross-region active-active for user data (cost + residency) — full-region loss remains an hours-scale DR event, disclosed as such. Addresses audit **SR-04** (availability↔SLO reconciliation) via [05-remediation-plan.md](05-remediation-plan.md); superseding open question §9.4.
 
 ---
 
@@ -316,13 +426,15 @@ We validate every `[A#]` assumption before it becomes a SLA promise.
 | **WS soak** — N long-lived connections streaming synthetic Opus audio for 30 min | k6 (`xk6-websockets`) + custom audio replayer | A9 (conns/task), memory/FD leaks, drain-on-deploy | no dropped calls across a rolling deploy; flat memory |
 | **Concurrency ramp** — 0 → 2× peak concurrent sessions | k6 + synthetic session harness | §3 capacity numbers, autoscale reaction time | p95 live latency stays < 1.2s through the ramp |
 | **STT failover** — kill primary mid-load | fault injection (toxiproxy on provider egress) | §5.1 breaker + failover transparency | zero user-visible cue loss on failover |
-| **Claude 429/529 storm** — inject rate-limit responses | mock Anthropic edge / toxiproxy | §2.3 token bucket + degradation ladder | degrades per §5.3, never hangs |
-| **pgvector load** — RAG queries at peak concurrency | pgbench + vector query mix | §2.4 replica routing, p99 | RAG search p99 < target, no OLTP p99 regression |
+| **Claude 429/529 storm — both regions** — saturate one region's admission budget, inject rate-limit responses | mock Anthropic edge / toxiproxy | §2.3 + §4.4 **regional** token bucket + degradation ladder | degrades per §5.3, never hangs; **saturating one region does NOT degrade the other's cue flow** (SR-02/SR-06) |
+| **pgvector load** — RAG queries at peak concurrency, multi-tenant corpus | pgbench + vector query mix | §2.4 replica routing, p99 | RAG search p99 < target, no OLTP p99 regression |
+| **pgvector filtered recall** — HNSW top-k vs exact brute-force under `org_id` pre-filter, across tenant-size buckets | custom harness (seq-scan ground truth) | §2.7 filtered-HNSW recall | **recall@k ≥ 0.95** at production `ef_search` for every tenant-size bucket **AND** p99 within target (SR-07) |
+| **Redis-split failover** — fail over control Redis and session/stream Redis **separately** | ElastiCache failover / chaos | §2.6 split + fail-open admission | control-Redis loss ⇒ cues continue on local budget; session-Redis loss ⇒ sessions resume via replay; neither stalls the live path (SR-05) |
 | **Connection-storm reconnect** — drop 50% of sockets simultaneously | chaos on ALB/tasks | §5.2 reconnect+resume | all resume within 60s grace, no thundering-herd on `api` ticket mint |
 | **Backpressure** — throttle a session's downstream | toxiproxy | §5.4 bounded buffers | server memory bounded; client sheds bitrate |
 
 - **Cadence:** full suite before each scale milestone (Launch → Growth → Scale) and on any change to the live path. A trimmed WS-soak + degradation suite runs nightly against staging.
-- **Chaos in staging** (GameDays): scheduled region-AZ loss, provider outage, Redis failover — validate DR RTO/RPO with [DevOps](60-devops-infrastructure.md).
+- **Chaos in staging** (GameDays): scheduled region-AZ loss, provider outage, Redis failover — validate the **§4.5 DR RTO/RPO** numbers and the error-budget claims with [DevOps](60-devops-infrastructure.md).
 - **Observability closes the loop:** load tests assert on the same SLO dashboards/traces defined in [Observability](61-observability.md) (live-latency p95, breaker state, pool saturation, provider error rate), so a test failure and a prod incident look identical.
 
 ---
@@ -331,8 +443,8 @@ We validate every `[A#]` assumption before it becomes a SLA promise.
 
 1. **A9 (connections per `ws-gateway` task) is unvalidated** and drives the whole gateway sizing. Audio-relay CPU cost per connection under real Opus + fan-out is an estimate; the WS-soak test (§8) must produce a measured number before we publish capacity commitments.
 2. **STT & Claude are lead-time bottlenecks, not autoscaling ones.** Concurrency ceilings and TPM/RPM are contractual and take weeks to raise. A viral spike (a launch, press) can outrun procurement; §6 admission control is the safety valve, but the *business* risk (turning away demand) needs a capacity-buffer policy owned with [Roadmap](80-roadmap.md).
-3. **Redis is a shared stateful dependency on the hot path** (streams, offsets, counters, token bucket). Its own scaling/HA (cluster mode, failover time) is summarized here but owned by [Data model](30-data-model.md) / [DevOps](60-devops-infrastructure.md); a Redis failover stall would stall the live path — needs its own chaos test.
-4. **No cross-region user failover by design** (residency). A full `eu-west-1` outage degrades EU users to DR-restore RTO. Whether that is acceptable, or whether we need an in-EU multi-region posture (e.g. a second EU region), is a compliance + cost decision open with [DevOps](60-devops-infrastructure.md).
-5. **Peak-to-average factor A4=6×** assumes US+EU-only, business-hours-clustered usage. Adding APAC (future) both smooths the curve *and* adds a third region — changes both capacity and residency models.
-6. **pgvector on the primary vs a dedicated vector store.** If RAG query load at Scale degrades OLTP despite replicas, we may split embeddings onto a dedicated vector service — a data-model decision to revisit with [Data model](30-data-model.md), not committed now.
+3. **Redis split now isolates the hot path** (ADR-70.2): control Redis (token bucket/counters) is separated from session/stream Redis, each Multi-AZ with independent failover and an independent §8 chaos test. The residual risk is the fail-open local-budget approximation under control-Redis loss — validate it does not overcommit provider quota during a real failover window. HA internals owned by [Data model](30-data-model.md) / [DevOps](60-devops-infrastructure.md).
+4. **Full-region loss is scoped out of the 99.9% SLO** (ADR-70.5): in-region Multi-AZ HA earns 99.9%; total-region loss is a separate DR tier (RTO hours / RPO ≤5 min), and residency still forbids cross-region user failover. The open item is whether an in-EU second-region posture is ever funded — a cost decision with [DevOps](60-devops-infrastructure.md), not committed now.
+5. **Regional peak factor A4r=8× (and the 65/35 A5s split)** assume US+EU-only, single-region business-hours clustering; both are the load-bearing capacity inputs (§3.2) and must be replaced by measured signup-region + concurrency telemetry. Adding APAC (future) adds a third region and re-derivation.
+6. **pgvector on the primary vs a dedicated vector store.** Filtered-HNSW recall is now a measured gate with a per-tenant partial/partitioned-index path before Growth (ADR-70.4, §2.7). If recall or OLTP p99 still degrade at Scale despite replicas + per-tenant indexes, splitting embeddings onto a dedicated vector service is the next step — a data-model decision to revisit with [Data model](30-data-model.md), not committed now.
 7. **Admission-control UX under overload** ("notes-only mode") must be designed so degradation feels like a feature, not a failure — needs [Design system](12-design-system.md) input.

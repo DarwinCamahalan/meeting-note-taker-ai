@@ -8,7 +8,7 @@ This is the authoritative high-level architecture for **Cue** (provisional brand
 
 ## 1. Architectural principles
 
-1. **Latency is the product.** The end-to-end path from spoken audio to a visible cue in the overlay is the primary SLO (< 1.2s p95). Every architectural choice — transport, service placement, model routing, streaming — is judged first by its latency cost. See the budget in §5.
+1. **Latency is the product.** The path from spoken audio to a visible cue in the overlay is judged first on latency, and it is governed by **two budgets, not one** (§4.1): a **server-controllable e2e p95 < ~900 ms** (the SLO, measured from end-of-utterance endpointing to the first cue token leaving `ws-gateway` egress) and a **full user-perceived e2e p95 < 1.2 s** (reported-only, including client render, with the client↔region network measured separately and excluded from the SLO). Every architectural choice — transport, service placement, model routing, streaming — is judged first by its latency cost.
 2. **Privacy by construction.** The overlay is invisible to screen capture at the OS level, audio is processed in-flight and retained only per the user's data-retention policy, and model-training opt-out is the default. Owned by [Legal/Compliance](01-product-vision.md#responsible-use) and [Data model](30-data-model.md#data-lifecycle).
 3. **Stateless edges, stateful core.** `api`, `ws-gateway`, and `ai-orchestrator` are horizontally scalable and hold no durable state; all durable state lives in Postgres, Redis, and object storage.
 4. **BFF, not a monolith gateway.** `api` (NestJS) is a Backend-for-Frontend that both desktop and web talk to for CRUD, auth exchange, uploads, and entitlement checks. The realtime path deliberately bypasses it (see ADR-003).
@@ -142,9 +142,9 @@ flowchart TB
 
 ---
 
-## 4. Critical real-time data flow (the < 1.2s p95 path)
+## 4. Critical real-time data flow (the two-budget latency path)
 
-This is the flow that defines the product. Audio frames leave the desktop, are transcribed, assembled into a context-rich prompt, sent to Claude, and streamed back as cue tokens into the overlay — all within a p95 budget of 1.2 seconds from utterance-end to first visible cue token.
+This is the flow that defines the product. Audio frames leave the desktop, are transcribed, assembled into a context-rich prompt, sent to Claude, and streamed back as cue tokens into the overlay. Latency is governed by **two budgets** (detailed and owned in [AI pipeline §4](21-ai-pipeline.md#latency-budget)): the **server-controllable e2e p95 < ~900 ms** (the SLO) and the **full user-perceived e2e p95 < 1.2 s** (reported-only). The explicit **start point for both is end-of-utterance endpointing** (Deepgram `speech_final`), not the first audio frame.
 
 ```mermaid
 sequenceDiagram
@@ -173,26 +173,34 @@ sequenceDiagram
     O->>C: streaming completion (cached prefix hit)  TTFT ~250–450ms
     C-->>O: token stream
     O-->>G: cue tokens (gRPC bidi stream, backpressure-aware)  ~1–5ms
-    G-->>D: cue tokens over WSS  ~5–15ms
-    Note over D: First token painted in overlay<br/>p95 target: < 1.2s from utterance end
+    Note over G: ws-gateway EGRESS = trace split point<br/>server-controllable SLO stops here (< ~900ms<br/>from endpointing); client tail attributed separately
+    G-->>D: cue tokens over WSS  ~5–15ms (client-network, excluded from SLO)
+    Note over D: First token painted in overlay<br/>full user-perceived p95 < 1.2s (reported-only)
 
     O->>E: emit usage (minutes + tokens, async)
 ```
 
-### 4.1 Latency budget per hop (p95)
+### 4.1 Latency budget: two budgets, one start point
 
-| Hop | Component | Target | Notes |
+We do **not** publish a single e2e p95 by summing per-hop p95s — hops are correlated and the sum overstates the tail (a sum-of-p95 is not a valid p95). Instead we publish **two budgets**, both timed from the same explicit start point — **end-of-utterance endpointing** (Deepgram `speech_final`) — and the **empirically measured e2e p95 (not the stage sum) is the source of truth** for both. The per-hop figures below are design targets for attribution, not the SLO itself.
+
+The **trace split point is `ws-gateway` ingress/egress**: everything between the client and ws-gateway is client-network (attributed to the client, excluded from the SLO); everything inside ws-gateway egress→ingress is server-controllable. OpenTelemetry stamps this boundary so every cue trace decomposes cleanly into client-network vs server-controllable time (see [Observability](61-observability.md)).
+
+| Segment | Hop / component | p95 target | Counts toward |
 |---|---|---|---|
-| Audio uplink | desktop → ws-gateway (WSS) | 5–15 ms | Opus frames, regional edge |
-| Internal forward (uplink) | ws-gateway → ai-orchestrator (gRPC bidi) | 1–5 ms | Same VPC/AZ affinity; Redis **not** on this path |
-| STT partial | Deepgram streaming | < 300 ms | Partial results, not final |
-| STT final segment | endpointing after utterance | 150–250 ms | VAD + Deepgram endpointing |
-| Entitlement check | cached in Redis | 1–3 ms | Cache miss → Postgres ~10ms |
-| Context assembly | RAG (pgvector) + profile + window | 20–60 ms | Prompt-cached stable prefix |
-| Claude TTFT | haiku-4-5 (live) / sonnet-5 | 250–450 ms | Cache hit lowers input cost + TTFT |
-| Cue return (internal) | ai-orchestrator → ws-gateway (gRPC bidi) | 1–5 ms | Streamed token-by-token |
-| Cue return (downlink) | ws-gateway → desktop (WSS) | 5–15 ms | Streamed token-by-token |
-| **End-to-end p95** | **utterance end → first visible cue token** | **< 1.2 s** | Detailed budgeting owned by [AI pipeline](21-ai-pipeline.md#latency-budget) |
+| *(pre-start)* | Audio uplink desktop → ws-gateway (WSS) + STT partial/final | — | Before t0; STT endpointing **is** t0 |
+| **Server-controllable** | Ingress → entitlement check (Redis) | 1–3 ms | **SLO** |
+| **Server-controllable** | Context assembly: RAG (pgvector) + profile + window | 20–60 ms | **SLO** |
+| **Server-controllable** | Claude TTFT — haiku-4-5 (live) / sonnet-5 | 250–450 ms | **SLO** |
+| **Server-controllable** | Cue return (internal) ai-orchestrator → ws-gateway (gRPC bidi) | 1–5 ms | **SLO** |
+| **➜ SLO budget** | **endpointing → first cue token at ws-gateway egress** | **< ~900 ms** | **error-budgeted SLO** |
+| Client-network | Cue return (downlink) ws-gateway → desktop (WSS) + overlay paint | 5–15 ms + render | reported-only |
+| **➜ Full budget** | **endpointing → first cue token painted in overlay** | **< 1.2 s** | **reported-only** (client tail measured separately) |
+
+- **Cold-cache cues are folded into the reported p95.** The first cue of a session pays a cold prompt-cache prefix (and a cold retrieval); those requests are *not* excluded from the p95 — the published numbers above are the blended figure across cold and warm cues, so a session's opening cue cannot hide behind a warm-only average. Cold-path detail in [AI pipeline §4](21-ai-pipeline.md#latency-budget).
+- The client↔region network is **measured separately** (client-side RUM timing, attributed via the ingress/egress split) and reported on the full budget, but a slow client link can never burn the server SLO's error budget.
+
+> **ADR-007 — Two-budget latency SLO.** *Decision:* the error-budgeted SLO is the **server-controllable e2e p95 < ~900 ms** (endpointing → ws-gateway egress); the **full user-perceived e2e p95 < 1.2 s** is a reported-only companion. *Context:* summing per-hop p95s produced an invalid, non-actionable e2e number and let variable client networks corrupt an SLO the team cannot control. *Consequence:* the SLI/error-budget wiring lives in [Observability](61-observability.md) and the e2e release gate in [Engineering standards](13-engineering-standards.md); the ws-gateway ingress/egress trace split is the attribution boundary. Addresses audit **SR-03, SR-11, SR-14** via [05-remediation-plan.md](05-remediation-plan.md).
 
 > Transport, service placement, and the split return hop reconciled per [decision record](04-decision-record.md) (A01): the ws-gateway ↔ ai-orchestrator hop is gRPC bidirectional streaming; Redis holds only control state (admission/token-bucket, sessions, WS resume offsets, queues) and is never on the per-frame audio path.
 

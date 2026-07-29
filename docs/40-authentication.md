@@ -1,6 +1,6 @@
 # Authentication, Authorization & Identity Security
 
-> Status: Draft · Owner: Principal Architect (Identity & Security) · Last updated: 2026-07-29 · Related: [System architecture](02-system-architecture.md) · [Desktop app](10-desktop-app.md) · [Backend services](20-backend-services.md) · [Data model](30-data-model.md) · [Subscriptions & entitlements](50-subscriptions-entitlements.md) · [DevOps & infrastructure](60-devops-infrastructure.md) · [Observability](61-observability.md)
+> Status: Draft · Owner: Principal Architect (Identity & Security) · Last updated: 2026-07-29 · Related: [Decision record](04-decision-record.md) · [Remediation plan](05-remediation-plan.md) · [System architecture](02-system-architecture.md) · [Desktop app](10-desktop-app.md) · [Backend services](20-backend-services.md) · [Data model](30-data-model.md) · [Subscriptions & entitlements](50-subscriptions-entitlements.md) · [DevOps & infrastructure](60-devops-infrastructure.md) · [Observability](61-observability.md)
 
 This document is the authoritative reference for **who a caller is** (authentication) and **what they may do** (authorization) across every surface of **Cue** (provisional brand): the Electron desktop app, the Next.js web app, and the backend services (`api`, `ws-gateway`, `ai-orchestrator`, `entitlements`). It owns the token model, the desktop OAuth/PKCE flow, device binding, the RBAC org/team model, session lifecycle, step-up 2FA, and auth-endpoint hardening.
 
@@ -65,7 +65,7 @@ Cue issues its own tokens. Two token types, asymmetric signing, short access lif
 
 | Token | Format | Lifetime | Signing | Storage (desktop) | Storage (web) |
 |---|---|---|---|---|---|
-| **Access** | JWT (JWS, `ES256`) | **10 min** | EdDSA/ECDSA private key in AWS Secrets Manager; public JWKS at `GET /.well-known/jwks.json` | In-memory only (renderer never persists it) | In-memory (React state), never `localStorage` |
+| **Access** | JWT (JWS, `ES256`) | **10 min** | **AWS KMS asymmetric CMK (`ECC_NIST_P256`)** via `kms:Sign`; private key never leaves KMS; public JWKS at `GET /.well-known/jwks.json` (see §2.3) | In-memory only (renderer never persists it) | In-memory (React state), never `localStorage` |
 | **Refresh** | Opaque 256-bit random (stored **hashed** server-side), bound to a `session_id` | **30 days** sliding, **absolute max 90 days** | n/a (opaque; server looks up hash) | OS keychain via Electron `safeStorage` | `HttpOnly; Secure; SameSite=Lax` cookie, path-scoped to `/auth/refresh` |
 
 ### 2.1 Access-token claims
@@ -96,11 +96,44 @@ Cue issues its own tokens. Two token types, asymmetric signing, short access lif
 - **Access-token revocation window.** Because access tokens are stateless JWTs, a revoked session is still technically valid until its ≤10-min `exp`. For the highest-sensitivity actions (billing changes, device removal, org role changes) `api` performs an **online `sid` check** against a Redis revocation set, closing the window to near-zero. Streaming sessions on `ws-gateway` subscribe to a Redis pub/sub `revoke:<sid>` channel and drop the socket on revocation.
 
 > **ADR-40.2 — Stateless access JWT + opaque rotating refresh, hybrid revocation**
-> - **Decision:** `ES256` access JWT (10 min) validated statelessly at the edge; opaque hashed refresh with mandatory rotation + reuse detection; Redis `sid` denylist consulted only for high-sensitivity actions and for live WS sessions.
-> - **Context:** `ws-gateway` and `ai-orchestrator` are latency-critical and horizontally scaled; a DB/Redis round-trip on every audio frame is unacceptable given the <1.2s p95 cue budget (see [System architecture](02-system-architecture.md)).
+> - **Decision:** `ES256` access JWT (10 min), signed by an **AWS KMS asymmetric CMK** (see §2.3) and validated statelessly at the edge from the published JWKS; opaque hashed refresh with mandatory rotation + reuse detection; Redis `sid` denylist consulted only for high-sensitivity actions and for live WS sessions.
+> - **Context:** `ws-gateway` and `ai-orchestrator` are latency-critical and horizontally scaled; a DB/Redis round-trip on every audio frame is unacceptable given the <1.2s p95 cue budget (see [System architecture](02-system-architecture.md)). Verification uses only the cached public JWKS, so KMS is never on the validation hot path.
 > - **Alternatives:** (a) Fully stateful opaque access tokens — a lookup per request, kills latency budget. (b) Long-lived access JWTs — larger theft blast radius. (c) No online check at all — cannot promptly revoke.
-> - **Trade-offs:** Up to a 10-min stale-access window for low-sensitivity reads; accepted and bounded by short lifetime + selective online checks.
-> - **Consequence:** Cheap validation on the hot path; strong, fast revocation where it matters.
+> - **Trade-offs:** Up to a 10-min stale-access window for low-sensitivity reads; accepted and bounded by short lifetime + selective online checks. KMS `kms:Sign` adds ~a few ms per **mint** (not per verify), amortized by the 10-min lifetime and acceptable off the hot path.
+> - **Consequence:** Cheap validation on the hot path; strong, fast revocation where it matters; the signing private key is unexfiltratable (see §2.3).
+
+### 2.3 JWT signing keys — AWS KMS asymmetric signing
+
+The access-JWT private key is **never** materialized as an application secret. `api` signs each token with `kms:Sign` against an **AWS KMS asymmetric CMK** (`KeySpec=ECC_NIST_P256`, `SigningAlgorithm=ECDSA_SHA_256`, matching `ES256`). The private key is generated in, and never leaves, KMS; `api`'s task role holds only `kms:Sign` + `kms:GetPublicKey` on that specific key ARN. This replaces the earlier design of holding a raw EdDSA/ECDSA private key in AWS Secrets Manager.
+
+- **JWKS publication.** `api` calls `kms:GetPublicKey`, converts the SPKI DER into a JWK (`kty:EC, crv:P-256`), assigns a stable `kid` (KMS key-id + rotation generation), and serves it at `GET /.well-known/jwks.json`. The response is cached (ETag + short max-age) so downstream services verify statelessly against the cached key set.
+- **Rotation.** Rotation is **KMS key rotation**, not a Secrets Manager secret rotation. We rotate by provisioning a **new asymmetric CMK** (new `kid`), publishing its public key into the JWKS **alongside** the outgoing key, cutting `api` over to sign with the new key, and retiring the old key from the JWKS only after the max access-token lifetime (10 min) plus a safety margin has elapsed so no in-flight token is orphaned. Both keys are valid for verification during the overlap window; verifiers select by `kid`. (Single-tenant AWS-managed key material rotation does not change the public key, so key-generation rotation is done as an explicit new-CMK roll to actually roll the signing material.)
+- **Blast radius.** A compromise of `api`'s runtime can request signatures while the role is live but **cannot exfiltrate the private key**, so revoking the task role / disabling the CMK instantly stops all forgery — unlike a leaked Secrets Manager secret, which remains usable until every copy is rotated out.
+- **Cross-doc reconciliation:** DevOps §8 must provision the KMS asymmetric CMK + key policy and drop the Secrets Manager JWT-signing secret; see [DevOps & infrastructure](60-devops-infrastructure.md).
+
+> **ADR-40.3 — Sign access JWTs with an AWS KMS asymmetric CMK, not a raw Secrets Manager key**
+> - **Decision:** The `ES256` signing private key lives in AWS KMS (`ECC_NIST_P256`) and is used only via `kms:Sign`; JWKS is derived from `kms:GetPublicKey`; rotation is a new-CMK roll with dual-key JWKS overlap.
+> - **Context:** A signing key stored in Secrets Manager is a materialized secret — readable by any principal with `secretsmanager:GetSecretValue`, copyable into memory/logs/backups, and forgeable indefinitely once leaked. Token forgery is a full authn bypass, so the signing key warrants hardware-backed non-exportable custody.
+> - **Alternatives:** (a) Raw key in Secrets Manager (previous design) — exfiltratable, rotation = re-issue + redistribute secret. (b) Local ephemeral in-memory keypair per instance — JWKS churn + multi-instance divergence. (c) KMS **symmetric** HMAC — would force `HS256`, reintroducing the shared-secret + alg-confusion surface we reject in §6.
+> - **Trade-offs:** ~a few ms + a KMS API call per token **mint** (not per verify); a hard dependency on KMS availability for issuing (mitigated by KMS's regional SLA and by verification staying offline against cached JWKS).
+> - **Consequence:** The private key is non-exportable; rotation and revocation are IAM/KMS operations; verifiers are unchanged (still plain JWKS + `kid`).
+>
+> _Addresses audit S-05 via [05-remediation-plan.md](05-remediation-plan.md); consistent with the internal-crypto hardening in [04-decision-record.md](04-decision-record.md)._
+
+### 2.4 Redis (ElastiCache) and internal transport security
+
+The auth layer's revocation and anti-replay state lives in Redis: the `sid` denylist (§2.2/§5.1), DPoP `jti` anti-replay (§3.4), the `revoke:<sid>` pub/sub channel, and `/auth/*` rate-limiter buckets (§6). Because those keys carry security-relevant and transcript-derived data, [Data model](30-data-model.md) reclassifies Redis as **sensitive-data-bearing**, and the following are **launch requirements**, not hardening backlog:
+
+| Control | Requirement |
+|---|---|
+| **Encryption in transit** | ElastiCache `TransitEncryptionEnabled=true`; all clients connect over TLS (`rediss://`). No plaintext Redis listener. |
+| **Encryption at rest** | ElastiCache `AtRestEncryptionEnabled=true` (KMS CMK). |
+| **AUTH** | A Redis **AUTH token** (or RBAC ACL user) is required on every connection; the token is a Secrets Manager value injected at runtime, never in an image or repo. |
+| **Internal TLS** | Service-to-service calls (`api` ↔ `ws-gateway` ↔ `ai-orchestrator` ↔ `entitlements`) run over TLS via **ECS Service Connect**; no plaintext east-west auth/session traffic. |
+
+Provisioning of the ElastiCache TLS/AUTH parameters and the Service Connect TLS mesh is owned by [DevOps & infrastructure](60-devops-infrastructure.md) §2.3; this doc states the auth-layer requirement that drives it.
+
+> _Addresses audit S-06 via [05-remediation-plan.md](05-remediation-plan.md)._
 
 ---
 
@@ -336,12 +369,15 @@ Every **live copilot session** begins with an explicit consent gate before any a
 | **Access-token theft** | 10-min lifetime; `aud` pinned per service; audience-restricted; Redis `sid` denylist for sensitive ops + live WS. |
 | **Open redirect** | `redirect_uri` allowlist: only `127.0.0.1` loopback, `cue://auth/callback`, and exact web origins. |
 | **Brute force / credential stuffing** | Provider-side (Clerk) breach-password checks + rate limits; on our `/auth/*` an IP + account sliding-window limiter (Redis token bucket): e.g. `POST /auth/token` 10/min/IP, `/auth/step-up` 5/min/account, exponential backoff + lockout on repeated TOTP failure. |
-| **JWT algorithm confusion** | Only `ES256` accepted; `alg:none` and HS↔RS confusion rejected; keys from JWKS by `kid`; regular key rotation via Secrets Manager. |
+| **JWT algorithm confusion** | Only `ES256` accepted; `alg:none` and HS↔RS confusion rejected; keys from JWKS by `kid`; signing key is a non-exportable **AWS KMS asymmetric CMK** rotated via a new-CMK roll with dual-key JWKS overlap (§2.3) — no raw signing secret exists to steal. |
+| **Signing-key exfiltration** | Private key generated in and never leaving KMS; `api` role limited to `kms:Sign` + `kms:GetPublicKey` on one key ARN; disabling the CMK / revoking the role instantly halts all token minting (§2.3). |
 | **Enumeration** | Uniform responses/timing on login & password-reset (no "user exists" leak). |
 | **Session fixation** | New `session_id` minted on every authentication; never reuses a pre-auth id. |
+| **Redis / control-plane data exposure** | ElastiCache is treated as **sensitive-data-bearing** (it holds `sid` denylists, DPoP `jti` anti-replay, revocation pub/sub, and transcript-derived buffers per [Data model](30-data-model.md)): encryption **in transit (TLS) + at rest** and a required **AUTH token** are mandatory; no unauthenticated or plaintext Redis (§2.4). |
+| **Service-to-service interception** | Internal traffic (`api` ↔ `ws-gateway` ↔ `ai-orchestrator` ↔ `entitlements`) runs over TLS via **ECS Service Connect**; no plaintext east-west auth/session traffic inside the VPC (§2.4). |
 | **Audit** | All auth events (login, refresh, rotation-reuse, revocation, step-up, device add/remove, role change, SSO/SCIM change) written to an append-only audit log — see [Observability](61-observability.md). |
 
-Rate limiting, JWKS distribution, and Secrets Manager rotation are operationalized in [DevOps & infrastructure](60-devops-infrastructure.md).
+Rate limiting, JWKS distribution, and KMS-based signing-key provisioning/rotation are operationalized in [DevOps & infrastructure](60-devops-infrastructure.md).
 
 ---
 
@@ -373,3 +409,5 @@ Full request/response DTOs live in `packages/types` and are consumed via `packag
 - **SCIM edge cases.** Group-nesting, partial SCIM implementations across IdPs, and deprovisioning-vs-active-session timing (a SCIM delete must trigger `logout-all`) need integration test coverage per IdP.
 - **Consent record integrity.** The consent row is legally load-bearing; it must be tamper-evident (append-only, hash-chained) — coordinate the exact integrity mechanism with the `legal/compliance` doc.
 - **Keychain fallback exposure.** On Linux/edge cases where `safeStorage` is unavailable and we fall back to plaintext-capable stores, the refresh token's at-rest protection weakens; decide whether to hard-require encryption-available or degrade with a warning.
+- **KMS availability as a mint dependency.** Token *minting* now depends on KMS `kms:Sign` (§2.3); a regional KMS impairment would block new access/refresh issuance even though verification stays offline against cached JWKS. Needs a documented degradation posture (grace on existing tokens, ret/backoff on sign, and the DR stance reconciled with the 99.9% SLO in [Scalability](70-scalability.md)).
+- **JWKS overlap timing.** The dual-`kid` rotation window (§2.3) must exceed max access-token lifetime plus downstream JWKS cache max-age; a too-short overlap orphans in-flight tokens. Needs an explicit rotation runbook in [DevOps & infrastructure](60-devops-infrastructure.md).

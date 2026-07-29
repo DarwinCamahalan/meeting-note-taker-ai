@@ -1,6 +1,6 @@
 # Desktop App Architecture (Electron)
 
-> Status: Draft · Owner: Desktop/Client Architecture · Last updated: 2026-07-29 · Related: [System architecture](02-system-architecture.md) · [Repository structure](03-repository-structure.md) · [Design system](12-design-system.md) · [Backend services](20-backend-services.md) · [AI pipeline](21-ai-pipeline.md) · [Authentication](40-authentication.md) · [DevOps & release pipeline](60-devops-infrastructure.md) · [Legal & compliance](90-legal-compliance.md)
+> Status: Draft · Owner: Desktop/Client Architecture · Last updated: 2026-07-29 · Related: [System architecture](02-system-architecture.md) · [Repository structure](03-repository-structure.md) · [Design system](12-design-system.md) · [Backend services](20-backend-services.md) · [AI pipeline](21-ai-pipeline.md) · [Authentication](40-authentication.md) · [DevOps & release pipeline](60-devops-infrastructure.md) · [Engineering standards](13-engineering-standards.md) · [Decision record](04-decision-record.md) · [Remediation plan](05-remediation-plan.md)
 
 The `desktop` app is the primary surface of Cue: a cross-platform (macOS + Windows) Electron client that renders a private, always-on-top, transparent teleprompter-style overlay, captures meeting audio, and streams it to the [`ws-gateway`](20-backend-services.md) for live transcription and AI cues. This document specifies the process model, the overlay window, content protection (with honest limitations), audio capture, IPC, global shortcuts, secure token storage, and auto-update.
 
@@ -175,7 +175,7 @@ The overlay's visual language, typography, opacity ramps, and reduced-motion beh
 
 ## 5. Content protection (in depth)
 
-Content protection makes the overlay a **local-only surface**: it renders on the user's physical display but is excluded from the frame buffers that screen-capture and screen-share pipelines read. This is the same OS capability password managers, banking, and DRM apps use — see [Legal & compliance](90-legal-compliance.md) for the responsible-use framing.
+Content protection makes the overlay a **local-only surface**: it renders on the user's physical display but is excluded from the frame buffers that screen-capture and screen-share pipelines read. This is the same OS capability password managers, banking, and DRM apps use.
 
 ### 5.1 The three mechanisms
 
@@ -282,7 +282,7 @@ There is a hard line between two very different things:
 - **What we do (legitimate & standard):** exclude the overlay from *screen capture / screen share*, hide it from the *taskbar/Dock* and from *screen-share window pickers* (which read the OS window-enumeration list). These are supported OS features used by mainstream security apps.
 - **What we deliberately do NOT do:** hide the `Cue` process from the OS process list, spoof its name, evade antivirus/EDR, defeat MDM inventory, or otherwise make the software undetectable on the machine. That is malware behavior, it would jeopardize signing/notarization, and it is out of scope by design.
 
-This boundary is a product commitment, not just an implementation detail. It is reflected in the acceptable-use policy and disclosed-mode requirements owned by [Legal & compliance](90-legal-compliance.md).
+This boundary is a product commitment, not just an implementation detail. (Acceptable-use / disclosed-mode policy is out of scope for the current planning pass.)
 
 ---
 
@@ -367,7 +367,7 @@ sequenceDiagram
 - **macOS:** system-audio capture via ScreenCaptureKit requires the **Screen Recording** TCC grant; mic requires **Microphone**. We ship `NSMicrophoneUsageDescription` and the screen-capture entitlements, and use `systemPreferences.getMediaAccessStatus()` / `askForMediaAccess('microphone')`. Screen Recording cannot be re-prompted programmatically, so we deep-link to `System Settings > Privacy & Security > Screen Recording` and instruct a relaunch.
 - **Windows:** mic capture obeys the Microphone privacy setting (`Settings > Privacy > Microphone`); packaged apps must not be blocked there. WASAPI loopback needs no special permission.
 
-We request permissions **just-in-time** at first session start, never at install, with a plain-language rationale — an accessibility- and trust-first posture (see [Design system](12-design-system.md) and [Legal & compliance](90-legal-compliance.md)).
+We request permissions **just-in-time** at first session start, never at install, with a plain-language rationale — an accessibility- and trust-first posture (see [Design system](12-design-system.md)).
 
 ---
 
@@ -488,11 +488,42 @@ export function loadTokens(): TokenBundle | null {
 
 `safeStorage` uses the OS keychain (macOS Keychain) / DPAPI-backed keyring (Windows) as the encryption root; `keytar` is a fallback where `safeStorage` is unavailable. The full OAuth 2.0 Authorization Code + PKCE (system browser, loopback/deep-link redirect) and device-binding flows are owned by [Authentication](40-authentication.md); this doc only covers at-rest handling on the client.
 
+### 7.6 WebSocket auth-ticket presentation (off the query string)
+
+The main-process `ws-gateway` client authenticates each connection with a short-lived, single-use signed **WS ticket** minted by `api` (issuance + TTL owned by [Authentication](40-authentication.md)). The ticket is **never** placed on the connection URL query string: query strings leak into proxy/access logs, browser and OS history, and referrer chains, and the ticket is bearer-equivalent for the session.
+
+**Presentation:** the ticket is carried in the WebSocket handshake via a `Sec-WebSocket-Protocol` subprotocol value; a first-message auth frame is the fallback where a proxy strips custom subprotocol tokens. The socket stays **unauthenticated** until the ticket validates: `ws-gateway` accepts the upgrade, then admits no audio/cue frames until the first frame carries a valid ticket, and closes with a policy code on failure. The desktop client **never logs or persists** the ticket — it lives only in main-process memory for the duration of the handshake.
+
+```ts
+// apps/desktop/src/main/ws/connect.ts
+import WebSocket from 'ws';
+
+export function connectGateway(url: string, ticket: string): WebSocket {
+  // Ticket rides the subprotocol header, NOT url?ticket=… (S-07).
+  // `url` is the bare wss origin+path with no query string.
+  return new WebSocket(url, [`cue.v1`, `ticket.${ticket}`], {
+    // no ticket in headers we log; handshake-only, never retried with a stale ticket
+    handshakeTimeout: 5_000,
+  });
+}
+```
+
+The subprotocol carrier keeps the ticket out of the URL while remaining a standards-compliant part of the RFC 6455 handshake; `ws-gateway` echoes only the `cue.v1` protocol token back, never the ticket. Reconnection re-mints a fresh ticket rather than reusing the old one. Frame protocol, backpressure, and reconnect/resume semantics remain owned by [Backend services](20-backend-services.md).
+
+**ADR-10.3 — WS ticket via subprotocol / first-message frame, not the URL.**
+- **Decision:** Present the signed WS ticket as a `Sec-WebSocket-Protocol` value (first-message frame fallback); never in the connection URL query string.
+- **Context:** Query-string secrets leak into logs, proxies, and history; the ticket is bearer-equivalent until it expires.
+- **Alternatives:** `?ticket=` query param (leaky); a custom header (stripped by some proxies, unavailable to browser WS clients we may add later).
+- **Trade-offs:** Slightly more handshake plumbing on both ends; the socket is intentionally inert until the first frame validates.
+- **Consequence:** No ticket on the wire URL, no ticket in any log; unauthenticated sockets admit no data.
+
+_Addresses audit S-07 via [05-remediation-plan.md](05-remediation-plan.md); reconcile ticket issuance/TTL with [Authentication](40-authentication.md)._
+
 ---
 
 ## 8. Auto-update (electron-updater)
 
-The desktop app updates itself from the same signed release feed the [web download flow](11-web-landing.md) serves, published by the [release pipeline](60-devops-infrastructure.md) to R2/S3 + CDN (`latest-mac.yml` / `latest.yml`).
+The desktop app updates itself from the same signed release feed the [web download flow](11-web-landing.md) serves, published by the [release pipeline](60-devops-infrastructure.md) to R2/S3 + CDN (`latest-mac.yml` / `latest.yml`). Auto-update is a high-value tamper target: a compromised feed pushes code to every install. The client therefore verifies an **independent manifest signature** (a key distinct from the R2/S3 credentials) *before* it trusts the SHA-512 or downloads anything, and `autoDownload` stays **off** until the software supply-chain program is live (see §8.4 and [DevOps §supply-chain](60-devops-infrastructure.md)).
 
 ```mermaid
 sequenceDiagram
@@ -500,12 +531,16 @@ sequenceDiagram
     participant Feed as CDN release feed
     participant User
 
-    App->>Feed: Check latest-*.yml (on launch + every 4h)
-    Feed-->>App: version, files, sha512, signature
-    alt newer version
+    App->>Feed: Check latest-*.yml + latest-*.yml.minisig (on launch + every 4h)
+    Feed-->>App: manifest, files, sha512 + detached signature
+    App->>App: Verify manifest signature (pinned minisign key,<br/>distinct from R2/S3 creds) — FIRST
+    alt manifest signature invalid
+        App->>App: Refuse update, report to Sentry, no download
+    else valid & newer version
         App->>Feed: Download package (delta if available)
-        Feed-->>App: signed installer
-        App->>App: Verify sha512 + code signature
+        Feed-->>App: installer
+        App->>App: Verify sha512 (from signed manifest)
+        App->>App: Verify OS code signature<br/>(Win publisherName + verifyUpdateCodeSignature / mac notarization stapling)
         App->>User: "Update ready — restart to apply"
         User-->>App: Restart now / later
         App->>App: quitAndInstall()
@@ -517,23 +552,95 @@ sequenceDiagram
 ```ts
 // apps/desktop/src/main/updater.ts
 import { autoUpdater } from 'electron-updater';
+import type { NsisUpdater } from 'electron-updater';
+import { verifyManifestSignature } from './security/manifest-signature'; // pinned minisign key
+import { SUPPLY_CHAIN_PROGRAM_LIVE } from './config'; // gate flag — see §8.4
 
 export function initUpdater() {
-  autoUpdater.autoDownload = true;
+  // autoDownload stays OFF until the supply-chain program (60) is live:
+  // frozen lockfile, advisory scanning, SBOM, provenance, secret scanning,
+  // and an independently signed update manifest. Ungated auto-download of a
+  // compromised feed would be an unbounded RCE vector.
+  autoUpdater.autoDownload = SUPPLY_CHAIN_PROGRAM_LIVE;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.channel = process.env.CUE_UPDATE_CHANNEL ?? 'latest'; // latest | beta
+
+  if (process.platform === 'win32') {
+    // Never rely on electron-updater defaults: require signature verification and
+    // pin the expected publisher. publisherName is also pinned in electron-builder.yml.
+    const nsis = autoUpdater as NsisUpdater;
+    nsis.verifyUpdateCodeSignature = (publisherNames, path) =>
+      verifyWindowsPublisher(publisherNames, path, EXPECTED_PUBLISHER_NAME);
+  }
+
+  autoUpdater.on('update-available', async (info) => {
+    // Independent manifest-signature check BEFORE any download or sha512 trust.
+    // Key is pinned in the client binary and is DISTINCT from R2/S3 credentials,
+    // so an attacker with feed write access still cannot forge a valid manifest.
+    const ok = await verifyManifestSignature(info); // fetches latest-*.yml.minisig
+    if (!ok) {
+      reportSentry(new Error('update manifest signature invalid — refusing update'));
+      return; // hard stop: no download, no install
+    }
+    if (!autoUpdater.autoDownload) await autoUpdater.downloadUpdate();
+  });
 
   autoUpdater.on('update-downloaded', (info) => notifyRenderer('update:ready', info));
   autoUpdater.on('error', (err) => reportSentry(err));
 
-  autoUpdater.checkForUpdatesAndNotify();
+  autoUpdater.checkForUpdates();
   setInterval(() => autoUpdater.checkForUpdates(), 4 * 60 * 60 * 1000);
 }
 ```
 
-- **Integrity:** `electron-updater` verifies the SHA-512 in the YAML feed **and** the OS code signature (Apple Developer ID + notarization on macOS; OV/EV or Azure Trusted Signing on Windows) before applying. Signing/notarization mechanics live in [DevOps](60-devops-infrastructure.md).
+### 8.1 Layered integrity verification
+
+The client applies an update only when **all** of these pass, checked in order — the first two gate the download, the second two gate the install:
+
+| # | Check | What it defends | Key / source |
+| --- | --- | --- | --- |
+| 1 | **Independent manifest signature** (minisign / TUF-style detached sig over `latest-*.yml`) | A compromised R2/S3 origin serving a forged manifest — sha512 alone is insufficient because the manifest shares R2's origin | Public key **pinned in the client binary**, private key held **separately from R2/S3 credentials** (see 60) |
+| 2 | **Version + channel** monotonic check | Downgrade / channel-swap attacks | Signed manifest fields |
+| 3 | **SHA-512** of the downloaded installer vs the signed manifest | A swapped installer on the CDN | Hash from the now-trusted manifest |
+| 4 | **OS code signature** | A mis-signed / unsigned binary | Windows `publisherName` + `verifyUpdateCodeSignature`; macOS Developer ID + **notarization stapling** verified client-side |
+
+**ADR-10.4 — Independent manifest signing verified before sha512.**
+- **Decision:** Sign the update manifest with a minisign (or TUF-style feed) key **distinct from the R2/S3 publishing credentials**, and verify it in the client **before** trusting the sha512 or downloading.
+- **Context:** The default trust chain (sha512-in-the-yml + OS code signature) puts the yml on the same R2 origin as the artifacts, so one credential compromise (feed write) can serve a self-consistent malicious `{manifest, installer, sha512}`. A key not co-located with those credentials breaks that single point of failure.
+- **Alternatives:** sha512 + code signature only (single-origin trust); CDN TLS alone (does not bind content).
+- **Trade-offs:** A second key to provision, rotate, and pin; one more verify + sign step.
+- **Consequence:** Feed-write compromise alone cannot ship code; the signing key is the crown-jewel secret managed in [DevOps](60-devops-infrastructure.md).
+
+### 8.2 Windows publisher & signature pinning
+
+On Windows we do **not** rely on `electron-updater` defaults. We explicitly set `verifyUpdateCodeSignature` and pin `publisherName` (in `electron-builder.yml` and re-asserted at runtime) so an installer signed by any other certificate — including a valid-but-different code-signing cert — is rejected. This is tested, not assumed (§8.3).
+
+### 8.3 macOS notarization stapling
+
+Beyond Developer ID signing, the client verifies that the downloaded artifact carries a **stapled** notarization ticket (so verification succeeds even offline / if the notary service is unreachable). Stapling is produced in the release pipeline ([DevOps](60-devops-infrastructure.md)); the client asserts its presence before install.
+
+### 8.4 autoDownload gated on the supply-chain program
+
+`autoUpdater.autoDownload` **must remain `false`** until the software supply-chain program is live in CI/release: `pnpm --frozen-lockfile` installs, dependency-advisory scanning as a merge gate, a CycloneDX SBOM per release, SLSA-style build provenance, secret scanning, hash-pinned native addons, and the independent manifest-signing step above. Enabling silent auto-download of a feed that is not yet provenance- and signature-guaranteed would turn any supply-chain compromise into fleet-wide code execution. The `SUPPLY_CHAIN_PROGRAM_LIVE` flag flips on only when [DevOps §supply-chain](60-devops-infrastructure.md) confirms the program (provisioning + keys) is in place; the merge-gate half lives in [Engineering standards §5.2](13-engineering-standards.md).
+
+### 8.5 Tamper-rejection tests (release blocker)
+
+A CI suite asserts the client **rejects** every tampered-update case; a failure blocks the release. It is re-run on every Electron bump alongside the content-protection matrix (§5.3), because native-addon and updater behavior are ABI-bound to the Electron version.
+
+| Tamper case | Expected outcome |
+| --- | --- |
+| `latest-*.yml` with an **invalid / missing manifest signature** | Refused before download (check 1) |
+| **Swapped installer** (manifest sha512 no longer matches) | Refused before install (check 3) |
+| **Mis-signed binary** (valid cert, wrong `publisherName`) on Windows | Refused (check 4) |
+| **Un-stapled / un-notarized** artifact on macOS | Refused (check 4) |
+| **Downgrade** (older version than installed) | Refused (check 2) |
+
+Each case runs against a local test feed (e.g. `serveFeed({ manifestSig: 'corrupt' })`) and asserts `result.applied === false` with a specific `reason`, verifying no download occurred for pre-download refusals.
+
 - **Channels:** `latest` (stable) and `beta` support staged rollout.
 - **UX:** updates download silently and apply on user-approved restart or next quit — never mid-session, so a live meeting is never interrupted.
+
+_Addresses audit S-01 / S-04 via [05-remediation-plan.md](05-remediation-plan.md); supply-chain provisioning, key custody, and signing steps are owned by [DevOps](60-devops-infrastructure.md), and the merge gates by [Engineering standards](13-engineering-standards.md)._
 
 ---
 
@@ -571,6 +678,7 @@ sequenceDiagram
 | IPC contract | Vitest + typed mocks | every `contextBridge` channel against `@cue/types` |
 | E2E / integration | Playwright for Electron | window creation, shortcuts, click-through, updater flow |
 | Content protection | Custom native harness (§5.3) | invisibility matrix — **release gate** |
+| Update tamper-rejection | Local signed/tampered test feed (§8.5) | bad manifest sig / swapped installer / mis-signed / un-stapled / downgrade — **release gate** |
 | Native audio | Golden-file PCM tests | resample correctness, seq/timestamp continuity, VAD gating |
 | Manual QA lab | Physical macOS + Windows machines | Zoom/Meet/Teams/Webex live shares, multi-monitor, OS versions |
 
@@ -587,3 +695,5 @@ CI gates and coverage thresholds are defined in [Engineering standards](13-engin
 5. **Auto-update + native addons.** Native audio/window addons are ABI-bound to the Electron/Node version; every Electron bump requires rebuilding and re-running the full content-protection matrix before release.
 6. **Overlay always-on-top vs full-screen meeting apps.** Some full-screen presentation modes on Windows can steal top-most z-order; verify `screen-saver` level holds across Teams/Zoom full-screen and document exceptions.
 7. **Wayland/Linux.** Out of scope for v1 (macOS + Windows only), but content protection on Linux/Wayland is materially weaker — note before any future expansion.
+8. **Manifest-signing key custody & rotation.** The independent update-manifest key (§8.1) is a crown-jewel secret and must live apart from R2/S3 credentials; its custody, rotation, and the client-pinning refresh path (a rotated key must reach clients before it is used) are owned by [DevOps](60-devops-infrastructure.md) and must be settled before `autoDownload` is enabled.
+9. **Supply-chain program readiness gates the flag.** `SUPPLY_CHAIN_PROGRAM_LIVE` (§8.4) stays `false` until the full program is live; track the go/no-go against [DevOps §supply-chain](60-devops-infrastructure.md) and [Engineering standards §5.2](13-engineering-standards.md) so the flag flips deliberately, not by default.
