@@ -15,6 +15,7 @@
   "dependencies": {
     "@cue/core": "workspace:*",
     "@cue/db": "workspace:*",
+    "@cue/observability": "workspace:*",
     "@cue/proto": "workspace:*",
     "@cue/types": "workspace:*",
     "@grpc/grpc-js": "^1.12.0",

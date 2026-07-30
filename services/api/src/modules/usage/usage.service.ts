@@ -11,7 +11,9 @@
  * socket); this service is the persistence + Stripe-reporting authority that the
  * gateway/metering worker calls into.
  */
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import type { MetricsRegistry } from '@cue/observability';
+import { METRICS_REGISTRY } from '@cue/observability/nest';
 import type Stripe from 'stripe';
 import { and, desc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
 import { orgs, subscriptions, usageEvents } from '@cue/db';
@@ -41,6 +43,7 @@ export class UsageService {
     private readonly config: AppConfig,
     private readonly db: DbService,
     private readonly stripe: StripeService,
+    @Inject(METRICS_REGISTRY) private readonly metrics: MetricsRegistry,
   ) {}
 
   /** The `GET /v1/billing/usage` summary for an org's current period. */
@@ -106,6 +109,10 @@ export class UsageService {
 
     const billableMinutes = this.billableDelta(before.used, minutes, before.included);
     const after = await this.compute(orgId);
+
+    // Billing-truth SLI: minutes are labelled by tier ONLY (cardinality guard —
+    // never userId/orgId). Recorded once per session alongside the ledger row.
+    this.metrics.sli.minutesConsumedTotal.inc({ tier: after.tier }, minutes);
 
     let reportedToStripe = false;
     if (billableMinutes > 0 && after.overageAllowed && this.stripe.isConfigured) {

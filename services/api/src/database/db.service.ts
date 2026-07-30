@@ -5,6 +5,7 @@
  * shutdown via Nest's lifecycle hook.
  */
 import { Injectable, type OnModuleDestroy } from '@nestjs/common';
+import { sql } from 'drizzle-orm';
 import { createDb, type Database } from '@cue/db';
 import { AppConfig } from '../config/app-config.js';
 
@@ -19,6 +20,15 @@ export class DbService implements OnModuleDestroy {
   /** The Drizzle client (typed against the full @cue/db schema). */
   get db(): Database {
     return this.handle.db;
+  }
+
+  /**
+   * Deep readiness ping — a trivial `SELECT 1` proving the pool can reach
+   * Postgres. Used by the `/readyz` probe (see main.ts); never logs any row data.
+   */
+  async ping(): Promise<boolean> {
+    await this.handle.db.execute(sql`select 1`);
+    return true;
   }
 
   async onModuleDestroy(): Promise<void> {

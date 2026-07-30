@@ -25,10 +25,29 @@ export interface OrchestratorEnv {
   readonly voyageApiKey: string | undefined;
   /** Postgres + pgvector connection string for RAG retrieval. Optional. */
   readonly databaseUrl: string | undefined;
+  /** Port the standalone /metrics + /readyz + /livez server binds (METRICS_PORT). */
+  readonly metricsPort: number;
+  /** Region tag stamped on metrics/logs (AWS_REGION); undefined when unset. */
+  readonly region: string | undefined;
+  /**
+   * Regional admission-control budget (70 §2.3, §4.4, ADR-70.3). These are the
+   * *per-region* provider ceilings this orchestrator meters against — NOT a
+   * shared global pool. Claude RPM (requests/min) and STT concurrent-stream
+   * leases both draw from that region's own budget. `0` disables the local gate
+   * (dev). The full production path is a control-Redis token bucket; this
+   * process holds a conservative local budget = ceiling / expected-instances,
+   * which is also the §2.6 fail-open fallback when control Redis is briefly out.
+   */
+  readonly claudeRpmLimit: number;
+  /** Per-region concurrent STT stream ceiling (STT_CONCURRENCY). `0` disables. */
+  readonly sttConcurrency: number;
 }
 
 /** Fallback bind address when ORCHESTRATOR_GRPC_ADDR is unset. */
 const DEFAULT_GRPC_ADDR = '0.0.0.0:50051';
+
+/** Fallback /metrics port when METRICS_PORT is unset. */
+const DEFAULT_METRICS_PORT = 9464;
 
 /**
  * Read + validate the environment. Throws a clear error naming any missing
@@ -41,7 +60,30 @@ export function loadOrchestratorEnv(env: NodeJS.ProcessEnv = process.env): Orche
     deepgramApiKey: required(env, 'DEEPGRAM_API_KEY'),
     voyageApiKey: optional(env, 'VOYAGE_API_KEY'),
     databaseUrl: optional(env, 'DATABASE_URL'),
+    metricsPort: parsePort(optional(env, 'METRICS_PORT'), DEFAULT_METRICS_PORT),
+    region: optional(env, 'AWS_REGION'),
+    claudeRpmLimit: parseCount(optional(env, 'CLAUDE_RPM_LIMIT'), 0),
+    sttConcurrency: parseCount(optional(env, 'STT_CONCURRENCY'), 0),
   };
+}
+
+function parsePort(raw: string | undefined, fallback: number): number {
+  if (raw === undefined) return fallback;
+  const port = Number.parseInt(raw, 10);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error(`[ai-orchestrator] invalid METRICS_PORT value: ${raw}`);
+  }
+  return port;
+}
+
+/** Parse a non-negative integer admission knob; `0` (default) disables the gate. */
+function parseCount(raw: string | undefined, fallback: number): number {
+  if (raw === undefined) return fallback;
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`[ai-orchestrator] invalid non-negative integer: ${raw}`);
+  }
+  return value;
 }
 
 function required(env: NodeJS.ProcessEnv, key: string): string {

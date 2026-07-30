@@ -28,6 +28,24 @@ export const EnvSchema = z.object({
   JWT_PRIVATE_KEY: z.string().optional(),
   JWT_PUBLIC_KEY: z.string().optional(),
 
+  /**
+   * Control-Redis connection string (rate-limit counters, per 70 §2.6). Optional
+   * so the app boots without Redis in local dev; the rate limiter then
+   * fails OPEN (allows) — never fail-closed on request admission.
+   */
+  REDIS_URL: z.string().optional(),
+
+  /** Fixed-window rate-limit period, seconds (per authenticated user / IP). */
+  RATE_LIMIT_WINDOW: z.coerce.number().int().positive().default(60),
+  /** Max requests per window before a 429 (RATE_LIMITED). */
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
+
+  /**
+   * AWS region tag — drives the per-region admission budgets (70 §4.4). Purely
+   * informational for `api`; the token buckets live in `ai-orchestrator`.
+   */
+  AWS_REGION: z.string().default('us-east-1'),
+
   /** Web app origin — CORS + the PKCE `/activate` verification page. */
   WEB_BASE_URL: z.string().url().default('http://localhost:3000'),
 
@@ -75,6 +93,10 @@ export class AppConfig {
   readonly nodeEnv: Env['NODE_ENV'];
   readonly apiPort: number;
   readonly databaseUrl: string;
+  readonly redisUrl: string | undefined;
+  readonly rateLimitWindow: number;
+  readonly rateLimitMax: number;
+  readonly awsRegion: string;
   readonly voyageApiKey: string | undefined;
   readonly jwtPrivateKey: string | undefined;
   readonly jwtPublicKey: string | undefined;
@@ -100,6 +122,10 @@ export class AppConfig {
     this.nodeEnv = env.NODE_ENV;
     this.apiPort = env.API_PORT;
     this.databaseUrl = env.DATABASE_URL;
+    this.redisUrl = env.REDIS_URL;
+    this.rateLimitWindow = env.RATE_LIMIT_WINDOW;
+    this.rateLimitMax = env.RATE_LIMIT_MAX;
+    this.awsRegion = env.AWS_REGION;
     this.voyageApiKey = env.VOYAGE_API_KEY;
     this.jwtPrivateKey = env.JWT_PRIVATE_KEY;
     this.jwtPublicKey = env.JWT_PUBLIC_KEY;

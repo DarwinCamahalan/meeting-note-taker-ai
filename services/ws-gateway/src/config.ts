@@ -16,6 +16,23 @@ export interface GatewayConfig {
   readonly jwtPublicKeyPem: string;
   /** Audience claim every ticket must carry (locked to the gateway). */
   readonly ticketAudience: string;
+  /** Port the standalone /metrics + /readyz + /livez server binds (METRICS_PORT). */
+  readonly metricsPort: number;
+  /** Region tag stamped on logs/metrics (AWS_REGION); undefined when unset. */
+  readonly region: string | undefined;
+  /**
+   * Hard per-task ceiling on concurrent live WS connections (WS_MAX_CONNECTIONS,
+   * 70 §2.1 / §3). New sockets past this are rejected `1013` (try again later)
+   * so a task never oversubscribes; autoscaling targets ~60% of this. `0`
+   * disables the cap (local dev).
+   */
+  readonly wsMaxConnections: number;
+  /**
+   * Max wall-clock to drain in-flight connections on SIGTERM before force-close
+   * (SHUTDOWN_DRAIN_MS). Bounds ECS task stop time on a connection-draining
+   * rolling deploy (70 §7). Default 30000.
+   */
+  readonly shutdownDrainMs: number;
 }
 
 /** The audience claim `api` stamps on WS tickets (docs/22 §5.2). */
@@ -36,6 +53,16 @@ function parsePort(raw: string | undefined, fallback: number): number {
     throw new Error(`[ws-gateway] invalid port value: ${raw}`);
   }
   return port;
+}
+
+/** Parse a non-negative integer env knob, falling back when unset/blank. */
+function parseCount(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`[ws-gateway] invalid non-negative integer: ${raw}`);
+  }
+  return value;
 }
 
 /**
@@ -60,5 +87,9 @@ export function loadConfig(): GatewayConfig {
     orchestratorAddr: process.env['ORCHESTRATOR_GRPC_ADDR']?.trim() || 'localhost:50051',
     jwtPublicKeyPem: normalizePem(requireEnv('JWT_PUBLIC_KEY')),
     ticketAudience: TICKET_AUDIENCE,
+    metricsPort: parsePort(process.env['METRICS_PORT'], 9464),
+    region: process.env['AWS_REGION']?.trim() || undefined,
+    wsMaxConnections: parseCount(process.env['WS_MAX_CONNECTIONS'], 5_000),
+    shutdownDrainMs: parseCount(process.env['SHUTDOWN_DRAIN_MS'], 30_000),
   };
 }
