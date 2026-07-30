@@ -46,8 +46,16 @@ export const EnvSchema = z.object({
    */
   AWS_REGION: z.string().default('us-east-1'),
 
-  /** Web app origin — CORS + the PKCE `/activate` verification page. */
+  /** Web app origin — the PKCE `/activate` verification page + default CORS origin. */
   WEB_BASE_URL: z.string().url().default('http://localhost:3000'),
+
+  /**
+   * Extra allowed CORS origins, comma-separated. Lets a hosted API accept the
+   * deployed web origin (e.g. the Vercel URL) AND localhost without overloading
+   * WEB_BASE_URL (which must stay a single URL for the activate-link builder).
+   * When unset, CORS allows exactly WEB_BASE_URL.
+   */
+  CORS_ORIGINS: z.string().optional(),
 
   /** Public ws-gateway URL handed to clients in a ws-ticket. */
   WS_PUBLIC_URL: z.string().min(1).default('ws://localhost:3002'),
@@ -101,6 +109,7 @@ export class AppConfig {
   readonly jwtPrivateKey: string | undefined;
   readonly jwtPublicKey: string | undefined;
   readonly webBaseUrl: string;
+  readonly corsOrigins: string[];
   readonly wsPublicUrl: string;
   readonly accessTokenTtl: number;
   readonly refreshTokenTtl: number;
@@ -130,6 +139,9 @@ export class AppConfig {
     this.jwtPrivateKey = env.JWT_PRIVATE_KEY;
     this.jwtPublicKey = env.JWT_PUBLIC_KEY;
     this.webBaseUrl = env.WEB_BASE_URL;
+    this.corsOrigins = env.CORS_ORIGINS
+      ? env.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
+      : [env.WEB_BASE_URL];
     this.wsPublicUrl = env.WS_PUBLIC_URL;
     this.accessTokenTtl = env.ACCESS_TOKEN_TTL;
     this.refreshTokenTtl = env.REFRESH_TOKEN_TTL;
