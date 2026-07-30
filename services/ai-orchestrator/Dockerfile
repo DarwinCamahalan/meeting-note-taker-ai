@@ -17,7 +17,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
 RUN pnpm turbo run build --filter=@cue/ai-orchestrator...
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm --filter=@cue/ai-orchestrator deploy --prod --legacy /app
+    pnpm --filter=@cue/ai-orchestrator deploy --prod /app
 
 FROM base AS runtime
 ENV NODE_ENV=production

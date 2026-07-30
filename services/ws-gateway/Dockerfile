@@ -17,7 +17,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
 RUN pnpm turbo run build --filter=@cue/ws-gateway...
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm --filter=@cue/ws-gateway deploy --prod --legacy /app
+    pnpm --filter=@cue/ws-gateway deploy --prod /app
 
 FROM base AS runtime
 ENV NODE_ENV=production

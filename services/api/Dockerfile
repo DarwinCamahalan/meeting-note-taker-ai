@@ -26,7 +26,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
 RUN pnpm turbo run build --filter=@cue/api...
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm --filter=@cue/api deploy --prod --legacy /app
+    pnpm --filter=@cue/api deploy --prod /app
 
 # ---- runtime: minimal, non-root -------------------------------------------
 FROM base AS runtime

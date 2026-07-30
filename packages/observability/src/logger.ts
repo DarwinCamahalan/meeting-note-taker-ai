@@ -10,9 +10,27 @@
  *    transcript/PII content can never be written even if a field slips into a
  *    log object.
  */
+import { createRequire } from 'node:module';
 import { trace } from '@opentelemetry/api';
 import { pino, type Logger, type LoggerOptions } from 'pino';
 import { REDACTION_CENSOR, buildRedactPaths } from './redaction.js';
+
+/**
+ * Whether the optional `pino-pretty` transport can actually be loaded. It is a
+ * DEV dependency, so it is absent from `--prod` deploys (containers). Without
+ * this guard, requesting the pretty transport there throws at logger creation
+ * ("unable to determine transport target for pino-pretty") and crashes the
+ * service on boot. When unavailable we silently fall back to JSON — the correct
+ * format for production log aggregation anyway.
+ */
+function prettyTransportAvailable(): boolean {
+  try {
+    createRequire(import.meta.url).resolve('pino-pretty');
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** A pino logger instance. Re-exported alias so consumers don't import pino. */
 export type CueLogger = Logger;
@@ -65,7 +83,9 @@ export function createLogger(serviceName: string, options: CreateLoggerOptions =
     mixin: traceMixin,
   };
 
-  if (pretty) {
+  // Pretty-print only when requested AND the transport is installed; otherwise
+  // fall back to structured JSON so prod containers (no pino-pretty) don't crash.
+  if (pretty && prettyTransportAvailable()) {
     opts.transport = {
       target: 'pino-pretty',
       options: { colorize: true, translateTime: 'SYS:HH:MM:ss.l', ignore: 'pid,hostname' },
