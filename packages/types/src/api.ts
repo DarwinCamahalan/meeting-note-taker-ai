@@ -194,6 +194,13 @@ export type DocumentStatus =
   | 'ready'
   | 'failed';
 
+/**
+ * Team-KB scope (Phase 3). `org` = shared with every member of the document's
+ * org (the default team knowledge base); `personal` = visible only to the
+ * uploading user, even inside a multi-member org.
+ */
+export type DocumentVisibility = 'personal' | 'org';
+
 export interface CueDocument {
   id: string;
   orgId: string;

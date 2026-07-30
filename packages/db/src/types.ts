@@ -13,9 +13,11 @@ import type {
   documentChunks,
   documents,
   entitlements,
+  invitations,
   orgMembers,
   orgs,
   sessions,
+  ssoConnections,
   subscriptions,
   transcriptSegments,
   transcripts,
@@ -62,3 +64,9 @@ export type NewUsageEvent = InferInsertModel<typeof usageEvents>;
 
 export type AuditLog = InferSelectModel<typeof auditLogs>;
 export type NewAuditLog = InferInsertModel<typeof auditLogs>;
+
+export type SsoConnection = InferSelectModel<typeof ssoConnections>;
+export type NewSsoConnection = InferInsertModel<typeof ssoConnections>;
+
+export type Invitation = InferSelectModel<typeof invitations>;
+export type NewInvitation = InferInsertModel<typeof invitations>;

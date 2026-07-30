@@ -3,23 +3,37 @@
  * `api` REST endpoint and is fully typed against @cue/types.
  */
 import type {
+  AcceptInviteRequest,
+  AdminMemberView,
+  AuditLogEntry,
   AuthTokens,
   CheckoutSessionRequest,
   CheckoutSessionResponse,
+  CreateInviteRequest,
   CreateSessionRequest,
+  CreateSsoConnectionRequest,
   Document,
   DocumentUploadRequest,
   DocumentUploadResponse,
   EntitlementsResponse,
+  ListAuditLogsQuery,
   ListSessionsQuery,
   MeResponse,
+  OrgInvite,
+  OrgSettings,
   Paginated,
   PkceExchangeRequest,
   PkceStartRequest,
   PkceStartResponse,
   PortalLinkResponse,
   RefreshRequest,
+  SeatSummary,
   Session,
+  SsoAuthorizeRequest,
+  SsoAuthorizeResponse,
+  SsoConnection,
+  UpdateMemberRequest,
+  UpdateOrgSettingsRequest,
   UsageSummary,
   WsTicket,
 } from '@cue/types';
@@ -113,6 +127,24 @@ export class DocumentsResource {
   get(id: string): Promise<Document> {
     return this.http.get<Document>(`/v1/documents/${encodeURIComponent(id)}`);
   }
+
+  /** `GET /v1/orgs/:orgId/documents` — list the org's shared team knowledge base. */
+  listOrgKb(orgId: string, query?: { cursor?: string; limit?: number }): Promise<Paginated<Document>> {
+    return this.http.get<Paginated<Document>>(
+      `/v1/orgs/${encodeURIComponent(orgId)}/documents`,
+      { query: { cursor: query?.cursor, limit: query?.limit } },
+    );
+  }
+
+  /**
+   * `DELETE /v1/orgs/:orgId/documents/:documentId` — remove a document from the
+   * shared team KB. Owners/admins only.
+   */
+  removeOrgDoc(orgId: string, documentId: string): Promise<void> {
+    return this.http.delete<void>(
+      `/v1/orgs/${encodeURIComponent(orgId)}/documents/${encodeURIComponent(documentId)}`,
+    );
+  }
 }
 
 export class BillingResource {
@@ -136,5 +168,119 @@ export class BillingResource {
   /** `GET /v1/billing/usage` — the current period's live-minute usage summary. */
   usageSummary(): Promise<UsageSummary> {
     return this.http.get<UsageSummary>('/v1/billing/usage');
+  }
+}
+
+export class SsoResource {
+  constructor(private readonly http: HttpClient) {}
+
+  /** `GET /v1/sso/authorize` — resolve a WorkOS authorization URL for an org/domain. */
+  authorize(query: SsoAuthorizeRequest): Promise<SsoAuthorizeResponse> {
+    return this.http.get<SsoAuthorizeResponse>('/v1/sso/authorize', {
+      query: {
+        organizationId: query.organizationId,
+        connectionId: query.connectionId,
+        domain: query.domain,
+        redirectUri: query.redirectUri,
+        state: query.state,
+      },
+    });
+  }
+
+  /** `GET /v1/orgs/:orgId/sso/connections` — list the org's SSO connections. */
+  listConnections(orgId: string): Promise<SsoConnection[]> {
+    return this.http.get<SsoConnection[]>(
+      `/v1/orgs/${encodeURIComponent(orgId)}/sso/connections`,
+    );
+  }
+
+  /** `POST /v1/orgs/:orgId/sso/connections` — provision a WorkOS connection. */
+  createConnection(orgId: string, body: CreateSsoConnectionRequest): Promise<SsoConnection> {
+    return this.http.post<SsoConnection>(
+      `/v1/orgs/${encodeURIComponent(orgId)}/sso/connections`,
+      { body, idempotency: true },
+    );
+  }
+
+  /** `DELETE /v1/orgs/:orgId/sso/connections/:connectionId` — remove a connection. */
+  deleteConnection(orgId: string, connectionId: string): Promise<void> {
+    return this.http.delete<void>(
+      `/v1/orgs/${encodeURIComponent(orgId)}/sso/connections/${encodeURIComponent(connectionId)}`,
+    );
+  }
+}
+
+export class AdminResource {
+  constructor(private readonly http: HttpClient) {}
+
+  /** `POST /v1/orgs/:orgId/invites` — invite a user to the org with a role. */
+  createInvite(orgId: string, body: CreateInviteRequest): Promise<OrgInvite> {
+    return this.http.post<OrgInvite>(`/v1/orgs/${encodeURIComponent(orgId)}/invites`, {
+      body,
+      idempotency: true,
+    });
+  }
+
+  /** `GET /v1/orgs/:orgId/invites` — list the org's invitations. */
+  listInvites(orgId: string): Promise<OrgInvite[]> {
+    return this.http.get<OrgInvite[]>(`/v1/orgs/${encodeURIComponent(orgId)}/invites`);
+  }
+
+  /** `POST /v1/invites/accept` — redeem an invite token as the signed-in user. */
+  acceptInvite(body: AcceptInviteRequest): Promise<AdminMemberView> {
+    return this.http.post<AdminMemberView>('/v1/invites/accept', { body, idempotency: true });
+  }
+
+  /** `GET /v1/orgs/:orgId/members` — cursor-paginated admin member list. */
+  listMembers(orgId: string, query?: { cursor?: string; limit?: number }): Promise<Paginated<AdminMemberView>> {
+    return this.http.get<Paginated<AdminMemberView>>(
+      `/v1/orgs/${encodeURIComponent(orgId)}/members`,
+      { query: { cursor: query?.cursor, limit: query?.limit } },
+    );
+  }
+
+  /** `PATCH /v1/orgs/:orgId/members/:userId` — change a member's role. */
+  updateMember(orgId: string, userId: string, body: UpdateMemberRequest): Promise<AdminMemberView> {
+    return this.http.patch<AdminMemberView>(
+      `/v1/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`,
+      { body },
+    );
+  }
+
+  /** `DELETE /v1/orgs/:orgId/members/:userId` — remove a member from the org. */
+  removeMember(orgId: string, userId: string): Promise<void> {
+    return this.http.delete<void>(
+      `/v1/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`,
+    );
+  }
+
+  /** `GET /v1/orgs/:orgId/audit-logs` — cursor-paginated audit trail. */
+  auditLogs(orgId: string, query?: ListAuditLogsQuery): Promise<Paginated<AuditLogEntry>> {
+    return this.http.get<Paginated<AuditLogEntry>>(
+      `/v1/orgs/${encodeURIComponent(orgId)}/audit-logs`,
+      {
+        query: {
+          cursor: query?.cursor,
+          limit: query?.limit,
+          action: query?.action,
+          actorUserId: query?.actorUserId,
+        },
+      },
+    );
+  }
+
+  /** `GET /v1/orgs/:orgId/settings` — read org-level settings. */
+  getOrgSettings(orgId: string): Promise<OrgSettings> {
+    return this.http.get<OrgSettings>(`/v1/orgs/${encodeURIComponent(orgId)}/settings`);
+  }
+
+  /** `PATCH /v1/orgs/:orgId/settings` — partial update of org settings. */
+  updateOrgSettings(orgId: string, body: UpdateOrgSettingsRequest): Promise<OrgSettings> {
+    return this.http.patch<OrgSettings>(`/v1/orgs/${encodeURIComponent(orgId)}/settings`, { body });
+  }
+
+  /** `GET /v1/orgs/:orgId/seats` — Team seat usage vs. purchased quantity. */
+  seats(orgId: string): Promise<SeatSummary> {
+    return this.http.get<SeatSummary>(`/v1/orgs/${encodeURIComponent(orgId)}/seats`);
   }
 }

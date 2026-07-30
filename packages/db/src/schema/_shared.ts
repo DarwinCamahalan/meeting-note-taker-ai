@@ -51,6 +51,14 @@ export const documentKindEnum = pgEnum('document_kind', [
   'other',
 ]);
 
+/**
+ * Team-KB visibility (Phase 3). `org` = shared across all org members (the
+ * default for the team knowledge base); `personal` = visible only to the
+ * uploading user, even inside a multi-member org. RAG retrieval and the
+ * document lists apply this scope on top of the `org_id` tenant filter.
+ */
+export const documentVisibilityEnum = pgEnum('document_visibility', ['personal', 'org']);
+
 export const documentStatusEnum = pgEnum('document_status', [
   'awaiting_upload',
   'uploaded',

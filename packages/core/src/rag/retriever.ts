@@ -15,6 +15,13 @@ import { VoyageEmbeddingsClient } from '../embeddings/voyage-client.js';
 export interface VectorSearchParams {
   /** Tenant filter, applied before the ANN scan. Required. */
   orgId: string;
+  /**
+   * Team-KB visibility scope. When set, the search returns org-shared
+   * (`visibility = 'org'`) chunks PLUS the caller's own personal documents;
+   * when omitted, only org-shared chunks are returned (never another user's
+   * personal docs). Applied before the ANN scan, alongside `orgId`.
+   */
+  userId?: string;
   /** The 1024-d query embedding to rank against `document_chunks.embedding`. */
   queryEmbedding: number[];
   /** Number of nearest neighbours to return. */
@@ -48,6 +55,12 @@ export interface RetrieverOptions {
 /** Per-call retrieval query. */
 export interface RetrievalQuery {
   orgId: string;
+  /**
+   * Optional caller identity. When set, the caller's personal documents are
+   * retrievable in addition to the org-shared team KB; when omitted, only the
+   * org-shared KB is searched.
+   */
+  userId?: string;
   /** Natural-language query text (typically the latest transcript turn). */
   query: string;
   topK?: number;
@@ -83,6 +96,7 @@ export class Retriever {
       queryEmbedding,
       topK: q.topK ?? this.defaultTopK,
       minScore: q.minScore ?? this.defaultMinScore,
+      ...(q.userId ? { userId: q.userId } : {}),
       ...(q.documentIds ? { documentIds: q.documentIds } : {}),
     });
 

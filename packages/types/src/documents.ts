@@ -8,7 +8,7 @@
  * Phase-1 {@link CueDocument} summary from ./api.js — this module is the richer
  * Phase-2 surface layered on top, and must not diverge those enums.
  */
-import type { DocumentKind, DocumentStatus } from './api.js';
+import type { DocumentKind, DocumentStatus, DocumentVisibility } from './api.js';
 
 /* ------------------------------------------------------------------ *
  * Documents
@@ -26,6 +26,11 @@ export interface Document {
   kind: DocumentKind;
   title: string;
   status: DocumentStatus;
+  /**
+   * Team-KB scope: `org` = shared with the whole org (default), `personal` =
+   * only the uploading `userId` can list/retrieve it.
+   */
+  visibility: DocumentVisibility;
   /** MIME type of the source file, when known. */
   mimeType: string | null;
   /** Source byte size, when known. */
@@ -46,6 +51,11 @@ export interface DocumentUploadRequest {
   title: string;
   /** Pre-extracted UTF-8 text to chunk + embed. */
   content: string;
+  /**
+   * Team-KB scope for the upload. Defaults to `org` (shared with the whole
+   * team) when omitted; pass `personal` for an individual, private upload.
+   */
+  visibility?: DocumentVisibility;
   /** MIME type of the original source, for provenance. */
   mimeType?: string;
   /** Original source byte size, for quota accounting. */

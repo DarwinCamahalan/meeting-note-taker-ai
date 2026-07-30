@@ -120,4 +120,13 @@ export * from './api.js';
 export * from './billing.js';
 export * from './documents.js';
 
+/**
+ * Phase 3 contract surface. `sso.js` = enterprise SSO / SCIM (WorkOS) DTOs;
+ * `admin.js` = RBAC roles / permissions / guard metadata, invites, member +
+ * role management, org settings, audit log, and seat accounting. Both are
+ * additive and do not shadow any Phase 0/1/2 export.
+ */
+export * from './sso.js';
+export * from './admin.js';
+
 export {};
