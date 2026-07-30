@@ -202,6 +202,30 @@ CUE_BACKEND=gateway pnpm --filter @cue/desktop dev
 
 The two paths are behavior-equivalent for the user; gateway mode is what enables server-side RAG, entitlements, usage metering, and observability. See the hop-by-hop detail in [`01-architecture-as-built.md`](01-architecture-as-built.md).
 
+## Build the desktop app into an installer
+
+Two steps: `electron-vite build` compiles `main`/`preload`/`renderer` into `apps/desktop/out/`; `electron-builder` then packages that into a distributable under `apps/desktop/release/` (gitignored).
+
+```bash
+# Compile only (fast sanity check — no packaging):
+pnpm --filter @cue/desktop build
+
+# Local UNSIGNED installer for this Mac's arch (dev/QA). Gatekeeper will
+# quarantine it on OTHER machines — right-click → Open to bypass:
+cd apps/desktop
+CSC_IDENTITY_AUTO_DISCOVERY=false RELEASES_URL="https://releases.local/desktop" \
+  pnpm exec electron-builder --mac dmg --arm64 --publish never
+```
+
+Gotchas (verified — see [`03-build-journal.md`](03-build-journal.md)):
+
+- `electron` must live in **`devDependencies`** — electron-builder errors if it's a production `dependency`.
+- `--publish never` **still expands** the `publish:` block, so `RELEASES_URL` must be set to *something* (any placeholder for a local build).
+- The `afterSign` notarize hook **skips cleanly** when `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` are unset — unsigned local builds never block on certs.
+- The icon comes from `apps/desktop/build/make-icon.py` → `build/icon.png`; regenerate with `python3 build/make-icon.py`.
+
+The **signed, notarized, universal** (both-arch) release is CI-only via `release-desktop.yml` using the signing env vars listed above. `package:mac` / `package:win` scripts wrap the same flow.
+
 ## Stripe & WorkOS local wiring (optional)
 
 - **Stripe webhooks:** `stripe listen --forward-to localhost:3001/v1/billing/webhook` prints the `whsec_…` → set `STRIPE_WEBHOOK_SECRET`. Seed Pro/Team/overage prices in the Stripe dashboard/CLI → set the `STRIPE_PRICE_*` ids. (Full steps in [`../README.md`](../README.md) Phase 2.)

@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "AssistMe desktop app (Electron): content-protected AI cue overlay.",
+  "author": "AssistMe <darwin.camahalan@aztechit.co.uk>",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -20,7 +21,6 @@
     "@cue/core": "workspace:*",
     "@cue/sdk": "workspace:*",
     "@cue/types": "workspace:*",
-    "electron": "^33.0.0",
     "electron-updater": "^6.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -30,6 +30,7 @@
   "devDependencies": {
     "@cue/config": "workspace:*",
     "@electron/notarize": "^2.5.0",
+    "electron": "^33.0.0",
     "@types/node": "^22.9.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
