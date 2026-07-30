@@ -157,6 +157,17 @@ gitGraph
 
 Unsigned / arm64 / single-arch is the **local dev/QA** build. The **signed + notarized + universal** build is CI-only (`release-desktop.yml`) and needs the Apple/Windows cert env vars documented in [`05-setup-and-run.md`](05-setup-and-run.md). Runtime still needs API keys (Phase 0) and, for gateway mode, the backend spine — the app launches and shows the protected overlay without them, but live cues require them. Artifacts live under `apps/desktop/release/` (gitignored).
 
+## Milestone: native system-audio loopback (the headline capability)
+
+**2026-07-30.** AssistMe can now hear the **other party**, not just the local mic — the feature the product is really about. Built at the user's explicit request (which lifted the earlier descope *for this feature*), with an in-app consent gate standing in for the still-absent legal framework.
+
+- **No native addon.** Electron ≥31 exposes system-audio loopback through `getDisplayMedia`: the renderer calls `getDisplayMedia({ video:true, audio:true })`, the main process's `setDisplayMediaRequestHandler` ([`apps/desktop/src/main/loopback.ts`](../apps/desktop/src/main/loopback.ts)) returns `{ video: <screen>, audio: 'loopback' }`, and the renderer drops the video track. ScreenCaptureKit backs it on macOS 13+, WASAPI on Windows.
+- **Mic / System / Both**, mixed. The capture hook opens 1–2 streams and sums them into one 16 kHz mono ScriptProcessor graph → the existing `sendAudioChunk` pipeline. "Both" = the full conversation in a single STT stream.
+- **Consent gate.** [`hooks/use-consent.ts`](../apps/desktop/src/renderer/hooks/use-consent.ts) + [`components/ConsentDialog.tsx`](../apps/desktop/src/renderer/components/ConsentDialog.tsx): a one-time, locally-persisted disclosure before any system-inclusive capture. It's a disclosure, **not** legal cover — the descoped consent/compliance framework still doesn't exist.
+- **Verified:** desktop typecheck + `electron-vite build` pass; repackaged into the arm64 `.dmg`. Residual: macOS Screen Recording permission is a runtime prompt; no per-speaker diarization yet (both sides mixed).
+
+Runtime code — merged to `dev`, **held from `main`** pending a local test run (see [the promotion policy](#the-one-thing-to-know-first)).
+
 ## Cross-cutting: what never got built (and why)
 
 - **Legal / consent / recording-disclosure.** Explicitly **descoped** in PR #2 (`cc85267` removed `90-legal-compliance.md` and the legal audit). The residual recording-consent + GDPR risk is real and unresolved — preserved in git history, and the reason the loopback capture stub is deliberately gated. Do **not** re-introduce legal docs; document it as descoped. See [`07-todos-and-gaps.md`](07-todos-and-gaps.md#descoped-legal--consent) and [`04-plan-mapping.md`](04-plan-mapping.md#the-legal-descope).

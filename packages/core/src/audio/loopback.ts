@@ -4,15 +4,19 @@ import type { AudioChunk } from '@cue/types';
  * System-audio loopback capture — the OTHER party's audio (e.g. the far side
  * of a video call).
  *
- * Phase 0 does NOT implement real capture. Real capture requires native
- * platform bindings and is gated behind the descoped consent /
- * recording-disclosure work:
- *   - macOS:   ScreenCaptureKit audio, or Core Audio process taps (macOS 14.4+)
- *   - Windows: WASAPI loopback capture
+ * NOTE (as-built): real loopback is now IMPLEMENTED, but in the desktop app,
+ * not here. The desktop renderer captures system audio via Electron's
+ * `getDisplayMedia({ audio: true })` routed through a main-process
+ * `setDisplayMediaRequestHandler` that returns an `audio: 'loopback'` track
+ * (ScreenCaptureKit on macOS 13+, WASAPI on Windows) — no native addon. It is
+ * gated behind an in-app one-time consent disclosure. See
+ * `apps/desktop/src/main/loopback.ts` + the renderer's
+ * `audio/capture-streams.ts` / `hooks/use-consent.ts`.
  *
- * The WORKING Phase 0 audio path is microphone capture, which lives in the
- * renderer (getUserMedia -> AudioWorklet -> window.cue.sendAudioChunk), not
- * here. Mic-only is sufficient to prove the end-to-end thread.
+ * This module's `NotImplementedLoopbackCapture` remains as a placeholder for a
+ * FUTURE `@cue/core`-side native per-process tap (Core Audio process taps,
+ * macOS 14.4+) if we ever need capture independent of Electron's WebRTC path.
+ * It is not on the shipped audio path.
  */
 export interface LoopbackCapture {
   /** Whether real loopback capture is available on this platform/build. */
