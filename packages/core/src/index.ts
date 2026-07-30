@@ -19,3 +19,7 @@ export * from './embeddings/voyage-client.js';
 export * from './rag/chunker.js';
 export * from './rag/retriever.js';
 export * from './rag/context-provider.js';
+
+/* Phase 4 — reliability: graceful-degradation ladder + resilient STT/LLM
+   wrappers (circuit breaker + backoff, "degrade never hang", 70 §5). */
+export * from './reliability/index.js';

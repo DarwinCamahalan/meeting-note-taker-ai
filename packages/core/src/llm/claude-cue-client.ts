@@ -58,6 +58,17 @@ export interface ClaudeCueOptions {
 }
 
 /**
+ * Per-call overrides for a single {@link ClaudeCueClient.streamCue}. Used by the
+ * reliability layer to shorten `max_tokens` on the degradation ladder's
+ * "Claude slow / near TPM cap" step (docs/70-scalability §5.3). Omitting it
+ * keeps the Phase 0 default so the healthy path is unchanged.
+ */
+export interface CueStreamOverrides {
+  /** Ceiling on output tokens for this cue; clamped to the Phase 0 MAX_TOKENS. */
+  maxTokens?: number;
+}
+
+/**
  * Streaming cue generation over Claude.
  *
  * `streamCue` opens an Anthropic Messages stream (thinking intentionally OFF
@@ -120,9 +131,11 @@ export class ClaudeCueClient {
   async *streamCue(
     context: CueContext,
     signal?: AbortSignal,
+    overrides?: CueStreamOverrides,
   ): AsyncGenerator<CueEvent> {
     const id = randomUUID();
     const userPrompt = this.buildUserPrompt(context);
+    const maxTokens = clampMaxTokens(overrides?.maxTokens);
 
     let buffer = '';
     let committed = false; // true once we know this is a real (non-<none>) cue
@@ -131,7 +144,7 @@ export class ClaudeCueClient {
       const stream = this.client.messages.stream(
         {
           model: this.model,
-          max_tokens: MAX_TOKENS,
+          max_tokens: maxTokens,
           system: this.buildSystem(context),
           messages: [{ role: 'user', content: userPrompt }],
         },
@@ -183,4 +196,13 @@ export class ClaudeCueClient {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Resolve the effective `max_tokens`: a positive override clamped to the Phase 0
+ * ceiling, else the default. Never exceeds {@link MAX_TOKENS} (latency guard).
+ */
+function clampMaxTokens(override?: number): number {
+  if (override === undefined || !Number.isFinite(override) || override <= 0) return MAX_TOKENS;
+  return Math.min(MAX_TOKENS, Math.floor(override));
 }
