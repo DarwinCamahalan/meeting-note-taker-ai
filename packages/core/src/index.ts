@@ -8,6 +8,7 @@
  */
 export * from './types.js';
 export * from './stt/deepgram-client.js';
+export * from './stt/local-whisper-client.js';
 export * from './llm/claude-cue-client.js';
 export * from './orchestrator/context.js';
 export * from './orchestrator/cue-orchestrator.js';

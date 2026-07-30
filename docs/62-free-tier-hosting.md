@@ -22,8 +22,8 @@ Fill the minimum:
 
 | Var | Needed for | Get it free? |
 |-----|-----------|--------------|
-| `ANTHROPIC_API_KEY` | cue generation (Claude) | pay-as-you-go, no floor |
-| `DEEPGRAM_API_KEY` | live STT | free trial credit, then PAYG |
+| `ANTHROPIC_API_KEY` | cue generation (Claude) | pay-as-you-go, no floor — **the only required paid key** |
+| `DEEPGRAM_API_KEY` | STT — **optional** | not needed: STT defaults to free local Whisper. Set only to opt into `STT_PROVIDER=deepgram` |
 | `VOYAGE_API_KEY` | RAG embeddings (optional) | free tier available |
 | `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY` | gateway ws-ticket auth | generate locally (below) |
 
@@ -59,7 +59,7 @@ Reset the database (re-runs migrations):
 docker compose down -v && docker compose up --build
 ```
 
-> **Verified 2026-07-30 (`docker compose up --build`):** postgres came up healthy with all 15 tables + `vector`/`pgcrypto` extensions (migrations auto-applied), redis healthy, `api` serving `/healthz → {"status":"ok"}`, and `ws-gateway` listening. `ai-orchestrator` **fail-loud-requires** `ANTHROPIC_API_KEY` + `DEEPGRAM_API_KEY` — it only boots once those are in `.env` (blank keys ⇒ it exits with `missing required env var ANTHROPIC_API_KEY`, by design). So a keyless stand-up is 4/5 up; add the two keys for 5/5.
+> **Verified 2026-07-30 (`docker compose up --build`):** postgres came up healthy with all 15 tables + `vector`/`pgcrypto` extensions (migrations auto-applied), redis healthy, `api` serving `/healthz → {"status":"ok"}`, and `ws-gateway` listening. STT now defaults to **free local Whisper** (`STT_PROVIDER=local-whisper`), so `ai-orchestrator` needs **only `ANTHROPIC_API_KEY`** at boot (no Deepgram). Blank Anthropic ⇒ it exits with `missing required env var ANTHROPIC_API_KEY` by design — set that one key for 5/5. The whisper model downloads on the first live session into the `whisper-models` volume.
 
 ### 3. Point the surfaces at it
 

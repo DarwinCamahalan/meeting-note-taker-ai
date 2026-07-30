@@ -9,6 +9,7 @@ import {
   type RagContextProvider,
 } from '../rag/context-provider.js';
 import { DeepgramSttClient } from '../stt/deepgram-client.js';
+import { LocalWhisperSttClient } from '../stt/local-whisper-client.js';
 import type { CueContext, CuePipeline, OrchestratorConfig } from '../types.js';
 import {
   DegradationController,
@@ -21,6 +22,16 @@ import { RollingTranscript } from './context.js';
 
 /** Default hard cap on the one-per-session retrieval wait (latency guard). */
 const DEFAULT_RAG_BUDGET_MS = 400;
+
+/** Assert a Deepgram key is present when the Deepgram provider is selected. */
+function requireDeepgramKey(config: OrchestratorConfig): string {
+  if (!config.deepgramApiKey) {
+    throw new Error(
+      "sttProvider 'deepgram' requires deepgramApiKey — set it, or use sttProvider 'local-whisper' (free, no key).",
+    );
+  }
+  return config.deepgramApiKey;
+}
 
 /** The minimal streaming-LLM surface the orchestrator consumes. */
 interface CueStreamer {
@@ -67,16 +78,26 @@ export class CueOrchestrator implements CuePipeline {
   private ragPrimed = false;
 
   constructor(config: OrchestratorConfig) {
+    // Default to Deepgram only when a key is present; otherwise the free,
+    // offline local-whisper provider (no key, no cloud).
+    const provider: 'deepgram' | 'local-whisper' =
+      config.sttProvider ?? (config.deepgramApiKey ? 'deepgram' : 'local-whisper');
     const resilient = config.reliability?.enabled ?? true;
+
     if (resilient) {
       const degradation = new DegradationController({
         onChange: (change) => this.degradationCb?.(change),
       });
       this.degradation = degradation;
-      this.stt = new ResilientSttClient({
-        factory: () => new DeepgramSttClient({ apiKey: config.deepgramApiKey }),
-        onDegradation: (level) => degradation.setStt(level),
-      });
+      // Deepgram runs behind the reconnect/failover wrapper; local-whisper has
+      // no socket to drop, so it is driven directly.
+      this.stt =
+        provider === 'deepgram'
+          ? new ResilientSttClient({
+              factory: () => new DeepgramSttClient({ apiKey: requireDeepgramKey(config) }),
+              onDegradation: (level) => degradation.setStt(level),
+            })
+          : new LocalWhisperSttClient(config.whisper);
       this.llm = new ResilientCueClient({
         client: new ClaudeCueClient({ apiKey: config.anthropicApiKey }),
         degradation,
@@ -86,7 +107,10 @@ export class CueOrchestrator implements CuePipeline {
       });
     } else {
       this.degradation = undefined;
-      this.stt = new DeepgramSttClient({ apiKey: config.deepgramApiKey });
+      this.stt =
+        provider === 'deepgram'
+          ? new DeepgramSttClient({ apiKey: requireDeepgramKey(config) })
+          : new LocalWhisperSttClient(config.whisper);
       this.llm = new ClaudeCueClient({ apiKey: config.anthropicApiKey });
     }
     this.stt.onTranscript((t) => this.handleTranscript(t));
