@@ -1,0 +1,145 @@
+syntax = "proto3";
+
+// The internal hot-path contract between ws-gateway (client) and
+// ai-orchestrator (server): one long-lived bidi Stream per live session.
+// Audio + control flow up; transcript + cue + state flow down. Redis is off
+// this per-frame path. Field numbers are immutable; additions are new numbers.
+package cue.orchestrator.v1;
+
+service Orchestrator {
+  // ws-gateway sends StartSession first, then AudioChunk frames, then StopSession;
+  // ai-orchestrator streams back Transcript / Cue / State envelopes.
+  rpc Stream(stream ClientEnvelope) returns (stream ServerEnvelope);
+}
+
+// ---- Client -> server ------------------------------------------------------
+
+message ClientEnvelope {
+  oneof kind {
+    StartSession start = 1; // MUST be the first message on the stream
+    AudioChunk   audio = 2;
+    StopSession  stop  = 3;
+  }
+}
+
+message StartSession {
+  string session_id = 1;
+  string org_id = 2;
+  string user_id = 3;
+  string data_region = 4;            // 'us' | 'eu' (residency pin)
+  SessionMode mode = 5;
+  AudioFormat format = 6;
+  repeated string document_ids = 7;  // RAG context scope
+  bool disclosed = 8;
+  string language = 9;               // ISO-639-1, default 'en'
+  uint32 resume_from_seq = 10;       // 0 = fresh; >0 = replay after this seq
+}
+
+message AudioFormat {
+  Codec codec = 1;
+  uint32 sample_rate = 2;            // 16000 | 48000
+  uint32 channels = 3;              // Phase 0: 1
+}
+
+message AudioChunk {
+  Channel channel = 1;               // MIXED | MIC | LOOPBACK
+  uint32 sequence = 2;               // mirrors the binary WS header seq
+  bytes  payload = 3;                // Opus packet | PCM16 (linear16 LE) chunk
+  int64  captured_at_ms = 4;         // client capture ts for latency attribution
+}
+
+message StopSession {}               // half-close signal (finalize)
+
+// ---- Server -> client ------------------------------------------------------
+
+message ServerEnvelope {
+  oneof kind {
+    Transcript transcript = 1;
+    Cue        cue = 2;
+    State      state = 3;
+  }
+}
+
+message Transcript {
+  TranscriptKind kind = 1;           // PARTIAL (interim) | FINAL (endpointed)
+  Speaker speaker = 2;
+  string text = 3;
+  uint32 seq = 4;                    // monotonic; present on FINAL (resume offset)
+  int64  start_ms = 5;
+  int64  end_ms = 6;
+  int64  ts_ms = 7;
+  uint32 confidence = 8;             // 0-100
+}
+
+message Cue {
+  CueKind kind = 1;                  // DELTA | DONE | NONE | ERROR
+  string id = 2;                     // groups all events of one cue
+  string text = 3;                   // delta token(s) or error reason
+  uint32 seq = 4;                    // present on DONE (resume offset)
+  Model  model = 5;
+}
+
+message State {
+  SessionState state = 1;
+  string detail = 2;                 // optional human-readable context / error
+  uint32 resumed_from_seq = 3;       // echoed on (re)connect
+}
+
+// ---- Enums -----------------------------------------------------------------
+
+enum Codec {
+  CODEC_UNSPECIFIED = 0;
+  OPUS = 1;
+  PCM16 = 2;
+}
+
+enum Channel {
+  CHANNEL_UNSPECIFIED = 0;
+  MIXED = 1;
+  MIC = 2;
+  LOOPBACK = 3;
+}
+
+enum SessionMode {
+  SESSION_MODE_UNSPECIFIED = 0;
+  INTERVIEW_PREP = 1;
+  INTERVIEW_LIVE = 2;
+  SALES = 3;
+  SUPPORT = 4;
+  MEETING_NOTES = 5;
+}
+
+enum SessionState {
+  SESSION_STATE_UNSPECIFIED = 0;
+  IDLE = 1;
+  LISTENING = 2;
+  THINKING = 3;
+  CUE = 4;
+  ERROR = 5;
+}
+
+enum TranscriptKind {
+  TRANSCRIPT_KIND_UNSPECIFIED = 0;
+  PARTIAL = 1;
+  FINAL = 2;
+}
+
+enum CueKind {
+  CUE_KIND_UNSPECIFIED = 0;
+  DELTA = 1;
+  DONE = 2;
+  NONE = 3;
+  CUE_ERROR = 4;
+}
+
+enum Speaker {
+  SPEAKER_UNSPECIFIED = 0;
+  THEM = 1;
+  ME = 2;
+}
+
+enum Model {
+  MODEL_UNSPECIFIED = 0;
+  HAIKU_4_5 = 1;
+  SONNET_5 = 2;
+}
