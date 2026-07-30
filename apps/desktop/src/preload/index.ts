@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type {
+  AppSettings,
+  AppStatus,
   AudioChunk,
   AuthState,
   CueEvent,
@@ -44,6 +46,17 @@ const api: IpcApi = {
   onTranscript: (cb: (t: TranscriptEvent) => void) =>
     subscribe<TranscriptEvent>('cue:transcript', cb),
   onCue: (cb: (e: CueEvent) => void) => subscribe<CueEvent>('cue:cue', cb),
+
+  getStatus: () => ipcRenderer.invoke('cue:status') as Promise<AppStatus>,
+  getSettings: () => ipcRenderer.invoke('cue:settings:get') as Promise<AppSettings>,
+  setSettings: (patch: Partial<AppSettings>) =>
+    ipcRenderer.invoke('cue:settings:set', patch) as Promise<AppSettings>,
+  startListening: async () => {
+    await ipcRenderer.invoke('cue:start-listening');
+  },
+  stopListening: async () => {
+    await ipcRenderer.invoke('cue:stop-listening');
+  },
 
   login: () => ipcRenderer.invoke('cue:auth:login') as Promise<AuthState>,
   logout: async () => {
