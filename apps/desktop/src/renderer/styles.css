@@ -1,0 +1,284 @@
+/*
+ * Cue overlay — teleprompter aesthetic.
+ * High contrast, semi-transparent dark surface, large readable type, no window
+ * chrome (the BrowserWindow is transparent + frameless). Motion is gated behind
+ * prefers-reduced-motion.
+ */
+
+:root {
+  --cue-bg: rgba(12, 14, 18, 0.82);
+  --cue-bg-bar: rgba(255, 255, 255, 0.04);
+  --cue-fg: #f5f7fa;
+  --cue-fg-muted: rgba(245, 247, 250, 0.55);
+  --cue-accent: #7cc4ff;
+  --cue-error: #ff6b6b;
+  --cue-radius: 14px;
+  --cue-listening: #4ade80;
+  --cue-thinking: #fbbf24;
+  --cue-cue: #7cc4ff;
+  --cue-error-dot: #ff6b6b;
+  --cue-idle: #64748b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  /* Window is transparent; only the overlay surface paints. */
+  background: transparent;
+  color: var(--cue-fg);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  cursor: default;
+  user-select: none;
+}
+
+/* --- Overlay surface ------------------------------------------------------ */
+
+.overlay {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  padding: 12px 16px 16px;
+  background: var(--cue-bg);
+  border-radius: var(--cue-radius);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(18px) saturate(120%);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.overlay__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  /* OS drag handle for the frameless window. */
+  -webkit-app-region: drag;
+}
+
+.no-drag,
+.overlay__toggle {
+  -webkit-app-region: no-drag;
+}
+
+/* --- Status pill ---------------------------------------------------------- */
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--cue-fg-muted);
+}
+
+.status__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--cue-idle);
+}
+
+.status__dot--listening {
+  background: var(--cue-listening);
+  animation: cue-pulse 1.6s ease-in-out infinite;
+}
+.status__dot--thinking {
+  background: var(--cue-thinking);
+  animation: cue-pulse 1s ease-in-out infinite;
+}
+.status__dot--cue {
+  background: var(--cue-cue);
+}
+.status__dot--error {
+  background: var(--cue-error-dot);
+}
+
+.status__label {
+  color: var(--cue-fg);
+  font-weight: 600;
+}
+
+.status__mic {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(74, 222, 128, 0.18);
+  color: var(--cue-listening);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* --- Start/Stop control --------------------------------------------------- */
+
+.overlay__toggle {
+  padding: 6px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(124, 196, 255, 0.14);
+  color: var(--cue-accent);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.overlay__toggle:hover {
+  background: rgba(124, 196, 255, 0.24);
+}
+.overlay__toggle--stop {
+  background: rgba(255, 107, 107, 0.16);
+  color: var(--cue-error);
+  border-color: rgba(255, 107, 107, 0.3);
+}
+.overlay__toggle:focus-visible {
+  outline: 2px solid var(--cue-accent);
+  outline-offset: 2px;
+}
+
+/* --- Header actions row --------------------------------------------------- */
+
+.overlay__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* --- Auth chip (Phase 1 sign-in affordance) ------------------------------- */
+
+.auth-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--cue-fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.auth-chip:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--cue-fg);
+}
+.auth-chip:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.auth-chip:focus-visible {
+  outline: 2px solid var(--cue-accent);
+  outline-offset: 2px;
+}
+
+.auth-chip__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cue-idle);
+}
+.auth-chip--signed_in .auth-chip__dot {
+  background: var(--cue-listening);
+}
+.auth-chip--authenticating .auth-chip__dot {
+  background: var(--cue-thinking);
+  animation: cue-pulse 1s ease-in-out infinite;
+}
+.auth-chip--error .auth-chip__dot {
+  background: var(--cue-error-dot);
+}
+
+/* --- Cue card (teleprompter) --------------------------------------------- */
+
+.cue-card {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  min-height: 88px;
+}
+
+.cue-card__text {
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.32;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+.cue-card__text--muted {
+  color: var(--cue-fg-muted);
+  font-size: 18px;
+  font-weight: 500;
+}
+.cue-card--error .cue-card__text {
+  color: var(--cue-error);
+}
+
+.cue-card__caret {
+  display: inline-block;
+  width: 3px;
+  height: 1.05em;
+  margin-left: 4px;
+  vertical-align: text-bottom;
+  background: var(--cue-accent);
+  animation: cue-blink 1s step-end infinite;
+}
+
+/* --- Ancillary lines ------------------------------------------------------ */
+
+.overlay__partial {
+  margin: 0;
+  font-size: 13px;
+  color: var(--cue-fg-muted);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overlay__error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--cue-error);
+}
+
+/* --- Motion --------------------------------------------------------------- */
+
+@keyframes cue-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.85);
+  }
+}
+
+@keyframes cue-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status__dot--listening,
+  .status__dot--thinking,
+  .auth-chip--authenticating .auth-chip__dot,
+  .cue-card__caret {
+    animation: none;
+  }
+}

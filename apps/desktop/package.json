@@ -1,0 +1,44 @@
+{
+  "name": "@cue/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cue desktop app (Electron): content-protected AI cue overlay.",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "package": "electron-vite build && electron-builder",
+    "package:mac": "electron-vite build && electron-builder --mac --publish never",
+    "package:win": "electron-vite build && electron-builder --win --publish never",
+    "publish": "electron-vite build && electron-builder --publish always",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "test": "tsx --test \"src/**/*.test.ts\"",
+    "test:update-verify": "tsx --test src/main/update-verify.test.ts",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@cue/core": "workspace:*",
+    "@cue/sdk": "workspace:*",
+    "@cue/types": "workspace:*",
+    "electron": "^33.0.0",
+    "electron-updater": "^6.3.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "ws": "^8.18.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@cue/config": "workspace:*",
+    "@electron/notarize": "^2.5.0",
+    "@types/node": "^22.9.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.5.12",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.0"
+  }
+}

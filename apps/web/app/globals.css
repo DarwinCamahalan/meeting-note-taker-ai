@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ *
+ * Tailwind v4 CSS-first theme. Design tokens live here (no JS config).
+ * In the full design system these import from @cue/ui/tokens.css
+ * (docs/12-design-system.md); inlined for the Phase 1 MVP.
+ * ------------------------------------------------------------------ */
+@theme {
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+
+  --color-cue-50: oklch(0.97 0.02 275);
+  --color-cue-100: oklch(0.94 0.04 275);
+  --color-cue-200: oklch(0.88 0.07 275);
+  --color-cue-300: oklch(0.8 0.11 275);
+  --color-cue-400: oklch(0.71 0.16 275);
+  --color-cue-500: oklch(0.62 0.19 275);
+  --color-cue-600: oklch(0.55 0.2 275);
+  --color-cue-700: oklch(0.47 0.18 275);
+
+  --color-ink-950: oklch(0.16 0.01 275);
+  --color-ink-900: oklch(0.2 0.012 275);
+  --color-ink-800: oklch(0.26 0.014 275);
+  --color-ink-700: oklch(0.34 0.014 275);
+
+  --radius-xl: 1rem;
+  --radius-2xl: 1.5rem;
+}
+
+/* Dark-first marketing surface. */
+:root {
+  color-scheme: dark;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-ink-950);
+    color: oklch(0.96 0.01 275);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  ::selection {
+    background-color: var(--color-cue-500);
+    color: white;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-cue-500
+      px-6 py-3 text-sm font-semibold text-white shadow-lg
+      shadow-cue-700/30 transition hover:bg-cue-400
+      focus-visible:outline-2 focus-visible:outline-offset-2
+      focus-visible:outline-cue-300 disabled:opacity-60;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border
+      border-white/15 bg-white/5 px-6 py-3 text-sm font-semibold text-white
+      transition hover:bg-white/10 focus-visible:outline-2
+      focus-visible:outline-offset-2 focus-visible:outline-cue-300;
+  }
+
+  .surface-card {
+    @apply rounded-2xl border border-white/10 bg-ink-900/70 p-6 backdrop-blur;
+  }
+}
+
+/* Respect reduced-motion for the decorative hero animation. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

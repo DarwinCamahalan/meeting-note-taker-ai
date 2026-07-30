@@ -1,0 +1,30 @@
+{
+  "name": "@cue/sdk",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Typed fetch-based client for the Cue api REST + auth contract.",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@cue/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@cue/config": "workspace:*",
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3"
+  }
+}

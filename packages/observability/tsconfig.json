@@ -1,0 +1,15 @@
+{
+  "extends": "@cue/config/tsconfig.base.json",
+  "// note": "Mirrors services/api: the NestJS module (src/nest) needs decorator metadata, and verbatimModuleSyntax is incompatible with emitDecoratorMetadata (type-only imports get elided before metadata is read), so both are overridden here. Everything else inherits the canonical base.",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "lib": ["ES2023"],
+    "types": ["node"],
+
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "verbatimModuleSyntax": false
+  },
+  "include": ["src"]
+}

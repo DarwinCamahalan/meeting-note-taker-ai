@@ -1,0 +1,34 @@
+{
+  "name": "@cue/ai-orchestrator",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cue ai-orchestrator: lean NestJS + gRPC server wrapping @cue/core (STT -> Claude cue pipeline) on the ws-gateway hot path.",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/main.js",
+    "dev": "tsc -p tsconfig.json && node dist/main.js",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@cue/core": "workspace:*",
+    "@cue/db": "workspace:*",
+    "@cue/observability": "workspace:*",
+    "@cue/proto": "workspace:*",
+    "@cue/types": "workspace:*",
+    "@grpc/grpc-js": "^1.12.0",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/config": "^4.0.0",
+    "@nestjs/core": "^11.0.0",
+    "drizzle-orm": "^0.36.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@cue/config": "workspace:*",
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3"
+  }
+}

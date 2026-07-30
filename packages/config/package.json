@@ -1,0 +1,28 @@
+{
+  "name": "@cue/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Canonical shared configuration for the Cue monorepo (single tsconfig base + eslint + prettier).",
+  "files": [
+    "tsconfig.base.json",
+    "eslint.config.js",
+    "prettier.config.js"
+  ],
+  "exports": {
+    "./tsconfig.base.json": "./tsconfig.base.json",
+    "./eslint": "./eslint.config.js",
+    "./prettier": "./prettier.config.js"
+  },
+  "peerDependencies": {
+    "eslint": "^9.13.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "@eslint/js": "^9.13.0",
+    "eslint-config-prettier": "^9.1.0",
+    "globals": "^15.11.0",
+    "typescript-eslint": "^8.11.0"
+  }
+}
