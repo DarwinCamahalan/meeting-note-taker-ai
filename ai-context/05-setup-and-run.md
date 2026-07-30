@@ -120,13 +120,19 @@ pnpm --filter @cue/desktop dev        # electron-vite dev server
 ```
 
 > **Native-module note (local-whisper in Electron):** `smart-whisper` is a native
-> addon; when `@cue/core` runs inside Electron's main process its ABI differs
-> from system Node, so it must be rebuilt for Electron
-> (`pnpm --filter @cue/desktop exec electron-rebuild -f -w smart-whisper`) and
-> unpacked from the asar when packaging. Until that's wired, use **gateway mode**
-> (`CUE_BACKEND=gateway`), where whisper runs in the plain-Node `ai-orchestrator`
-> — the fully-verified free-STT path. The client fails loud (overlay error) if the
-> addon can't load, rather than silently producing nothing.
+> addon; inside Electron's main process its ABI differs from system Node, so run
+> the rebuild **once** after install:
+>
+> ```bash
+> pnpm --filter @cue/desktop rebuild:native   # electron-rebuild -f -w smart-whisper
+> ```
+>
+> Then `pnpm --filter @cue/desktop dev` uses free local STT with no backend. It is
+> force-externalized in `electron.vite.config.ts` and `asarUnpack`ed at package
+> time (`electron-builder.yml`); electron-builder re-runs the ABI rebuild for the
+> `.dmg`/`.exe` (npmRebuild). If the addon still can't load, the client fails loud
+> (overlay error) and **gateway mode** (`CUE_BACKEND=gateway`, whisper in the
+> plain-Node `ai-orchestrator`) is the fallback.
 
 This is the whole product loop: audio → Deepgram → Claude → overlay. Pick the audio source in the overlay's **Me / Them / Both** selector:
 

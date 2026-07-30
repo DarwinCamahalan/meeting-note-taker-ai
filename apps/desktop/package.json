@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "rebuild:native": "electron-rebuild -f -w smart-whisper",
     "package": "electron-vite build && electron-builder",
     "package:mac": "electron-vite build && electron-builder --mac --publish never",
     "package:win": "electron-vite build && electron-builder --win --publish never",
@@ -30,16 +31,20 @@
   "devDependencies": {
     "@cue/config": "workspace:*",
     "@electron/notarize": "^2.5.0",
-    "electron": "^33.0.0",
+    "@electron/rebuild": "^4.2.0",
     "@types/node": "^22.9.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/ws": "^8.5.12",
     "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.0.0",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.3",
     "vite": "^6.0.0"
+  },
+  "optionalDependencies": {
+    "smart-whisper": "^0.8.1"
   }
 }

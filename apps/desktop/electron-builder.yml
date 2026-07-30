@@ -7,6 +7,14 @@ directories:
 files:
   - out/**/*
   - package.json
+  # Ship the native local-STT addon (optionalDependency) so local mode works
+  # offline. electron-builder rebuilds native modules for Electron's ABI at
+  # package time (npmRebuild, on by default).
+  - node_modules/smart-whisper/**/*
+# Native .node modules must live OUTSIDE the asar to be loadable at runtime.
+asarUnpack:
+  - "**/*.node"
+  - "**/node_modules/smart-whisper/**"
 # afterSign hook notarizes the macOS build via notarytool when Apple creds are
 # present in the env (see build/notarize.cjs). No-op on Windows / when unset.
 afterSign: build/notarize.cjs
