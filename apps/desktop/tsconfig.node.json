@@ -1,0 +1,10 @@
+{
+  "extends": "@cue/config/tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "outDir": "./out/types-node"
+  },
+  "include": ["src/main", "src/preload", "electron.vite.config.ts"]
+}
