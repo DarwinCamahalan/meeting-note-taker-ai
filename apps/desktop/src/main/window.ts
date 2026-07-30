@@ -32,10 +32,14 @@ function loadView(win: BrowserWindow, view: WindowView): void {
 /** The framed dashboard / settings window shown on launch. */
 export function createDashboardWindow(preloadPath: string): BrowserWindow {
   const win = new BrowserWindow({
-    width: 940,
-    height: 680,
-    minWidth: 720,
-    minHeight: 560,
+    // useContentSize: width/height are the WEB content area (excludes the title
+    // bar), so we can size the window to the tallest page (Home ≈ 849px at the
+    // min width) and never show a vertical scrollbar.
+    useContentSize: true,
+    width: 1080,
+    height: 880,
+    minWidth: 960,
+    minHeight: 860,
     title: 'AssistMe',
     show: false,
     backgroundColor: '#0b0e13',
