@@ -12,6 +12,6 @@ import { JwtService } from './jwt.service.js';
 @Module({
   controllers: [AuthController],
   providers: [AuthService, JwtService, JwtAuthGuard, DeviceCodeStore],
-  exports: [JwtService, JwtAuthGuard],
+  exports: [AuthService, JwtService, JwtAuthGuard],
 })
 export class AuthModule {}

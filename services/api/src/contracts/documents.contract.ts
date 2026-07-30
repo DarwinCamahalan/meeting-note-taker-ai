@@ -11,7 +11,7 @@ import type {
   DocumentUploadResponse,
   Paginated,
 } from '@cue/types';
-import { DocumentKindSchema, DocumentStatusSchema } from './shared.js';
+import { DocumentKindSchema, DocumentStatusSchema, DocumentVisibilitySchema } from './shared.js';
 import type { Assert, Equal, StripUndef } from './type-utils.js';
 
 /** Max inline document size (chars). Larger sources use the presigned flow (TODO). */
@@ -22,6 +22,7 @@ export const DocumentUploadRequestSchema = z
     kind: DocumentKindSchema,
     title: z.string().min(1).max(300),
     content: z.string().min(1).max(MAX_CONTENT_CHARS),
+    visibility: DocumentVisibilitySchema.optional(),
     mimeType: z.string().min(1).max(255).optional(),
     byteSize: z.number().int().nonnegative().optional(),
   })
@@ -34,6 +35,13 @@ export const ListDocumentsQuerySchema = z
   })
   .strict();
 
+/**
+ * `GET /v1/orgs/:orgId/documents` query — the shared team KB list. Same keyset
+ * pagination as {@link ListDocumentsQuerySchema}; the list is always scoped to
+ * org-shared (`visibility = 'org'`) documents.
+ */
+export const ListOrgDocumentsQuerySchema = ListDocumentsQuerySchema;
+
 export const DocumentSchema = z.object({
   id: z.string(),
   orgId: z.string(),
@@ -41,6 +49,7 @@ export const DocumentSchema = z.object({
   kind: DocumentKindSchema,
   title: z.string(),
   status: DocumentStatusSchema,
+  visibility: DocumentVisibilitySchema,
   mimeType: z.string().nullable(),
   byteSize: z.number().int().nullable(),
   chunkCount: z.number().int().nonnegative(),
@@ -61,6 +70,7 @@ export const PaginatedDocumentsSchema = z.object({
 
 export type DocumentUploadRequestDto = z.infer<typeof DocumentUploadRequestSchema>;
 export type ListDocumentsQueryDto = z.infer<typeof ListDocumentsQuerySchema>;
+export type ListOrgDocumentsQueryDto = z.infer<typeof ListOrgDocumentsQuerySchema>;
 export type DocumentDto = z.infer<typeof DocumentSchema>;
 export type DocumentUploadResponseDto = z.infer<typeof DocumentUploadResponseSchema>;
 export type PaginatedDocumentsDto = z.infer<typeof PaginatedDocumentsSchema>;

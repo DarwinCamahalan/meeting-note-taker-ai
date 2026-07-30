@@ -3,7 +3,10 @@
  * {@link VectorSearchPort}. Same contract as the api reference implementation:
  * org-scoped cosine top-k over `document_chunks` using the HNSW
  * `vector_cosine_ops` index, with the tenant filter applied BEFORE ranking
- * (30 §5). Cosine similarity = `1 - (embedding <=> query)`, clamped to 0..1.
+ * (30 §5). The team-KB visibility filter is applied in the same clause:
+ * org-shared chunks are always eligible; the session user's own personal
+ * documents are included only when `userId` is supplied. Cosine similarity =
+ * `1 - (embedding <=> query)`, clamped to 0..1.
  */
 import { sql } from 'drizzle-orm';
 import type { Database } from '@cue/db';
@@ -29,6 +32,10 @@ export class PgVectorSearch implements VectorSearchPort {
     if (topK <= 0 || queryEmbedding.length === 0) return [];
 
     const vectorLiteral = `[${queryEmbedding.join(',')}]`;
+    // Team-KB scope: org-shared docs always; personal docs only for their owner.
+    const visibilityFilter = params.userId
+      ? sql`AND (d.visibility = 'org' OR d.user_id = ${params.userId})`
+      : sql`AND d.visibility = 'org'`;
     const scopeFilter =
       params.documentIds && params.documentIds.length > 0
         ? sql`AND c.document_id = ANY(${params.documentIds})`
@@ -45,6 +52,7 @@ export class PgVectorSearch implements VectorSearchPort {
       FROM document_chunks c
       JOIN documents d ON d.id = c.document_id
       WHERE c.org_id = ${orgId}
+      ${visibilityFilter}
       ${scopeFilter}
       ORDER BY c.embedding <=> ${vectorLiteral}::vector
       LIMIT ${topK}

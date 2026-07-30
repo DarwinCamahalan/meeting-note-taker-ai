@@ -56,10 +56,16 @@ export class RagService implements OnModuleDestroy {
 
   /**
    * A retrieval seam bound to one session's tenant + document scope, or
-   * `undefined` when RAG is disabled. `documentIds` narrows to the session's
-   * scoped documents when provided; an empty list means the whole org corpus.
+   * `undefined` when RAG is disabled. Retrieval spans the org's shared team KB;
+   * when `userId` is set, the session user's own personal documents are
+   * additionally in scope. `documentIds` narrows to the session's scoped
+   * documents when provided; an empty list means the whole org corpus.
    */
-  providerFor(orgId: string, documentIds: readonly string[]): RagContextProvider | undefined {
+  providerFor(
+    orgId: string,
+    userId: string | undefined,
+    documentIds: readonly string[],
+  ): RagContextProvider | undefined {
     const retriever = this.retriever;
     if (!retriever) return undefined;
     const scoped = documentIds.length > 0 ? [...documentIds] : undefined;
@@ -68,6 +74,7 @@ export class RagService implements OnModuleDestroy {
         retriever.retrieve({
           orgId,
           query,
+          ...(userId ? { userId } : {}),
           ...(scoped ? { documentIds: scoped } : {}),
         }),
     };

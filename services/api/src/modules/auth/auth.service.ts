@@ -30,7 +30,12 @@ import type { AccessClaims, RefreshClaims } from './token-claims.js';
 const DEV_EMAIL = 'dev@usecue.app';
 const DEV_REGION: DataRegion = 'us';
 
-interface Identity {
+/**
+ * A resolved caller identity ready to be minted into first-party tokens. Shared
+ * with the SSO callback path (which resolves it from a WorkOS profile) so both
+ * flows mint tokens through the exact same {@link AuthService.issueTokensForIdentity}.
+ */
+export interface AuthIdentity {
   userId: string;
   orgId: string;
   email: string;
@@ -102,7 +107,16 @@ export class AuthService {
     return this.issueTokens(identity);
   }
 
-  private async issueTokens(identity: Identity): Promise<AuthTokens> {
+  /**
+   * Mint first-party access + refresh tokens for an already-resolved identity.
+   * Public entrypoint used by the SSO callback (and any non-PKCE issuer) so
+   * every flow shares one token shape. The consumer PKCE path is unchanged.
+   */
+  issueTokensForIdentity(identity: AuthIdentity): Promise<AuthTokens> {
+    return this.issueTokens(identity);
+  }
+
+  private async issueTokens(identity: AuthIdentity): Promise<AuthTokens> {
     const access = await this.jwt.sign<AccessClaims>(
       {
         sub: identity.userId,
@@ -126,7 +140,7 @@ export class AuthService {
     };
   }
 
-  private async loadIdentity(userId: string, orgId: string): Promise<Identity | undefined> {
+  private async loadIdentity(userId: string, orgId: string): Promise<AuthIdentity | undefined> {
     const [user] = await this.db.db.select().from(users).where(eq(users.id, userId)).limit(1);
     if (!user) return undefined;
     const memberships = await this.db.db
@@ -141,7 +155,7 @@ export class AuthService {
    * Find or provision the shared MVP dev identity (user + personal org + owner
    * membership). TODO(real IdP): derive identity from an approved IdP subject.
    */
-  private async resolveDevIdentity(): Promise<Identity> {
+  private async resolveDevIdentity(): Promise<AuthIdentity> {
     const [existing] = await this.db.db
       .select()
       .from(users)
@@ -165,7 +179,7 @@ export class AuthService {
       }
     }
 
-    return this.db.db.transaction(async (tx): Promise<Identity> => {
+    return this.db.db.transaction(async (tx): Promise<AuthIdentity> => {
       const [org] = await tx
         .insert(orgs)
         .values({

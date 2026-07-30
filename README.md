@@ -287,3 +287,117 @@ that lives only in CI — never alongside the R2/S3 artifact-host credentials.
 `prefers-reduced-motion` and code-split so it never bloats first paint. Pricing
 CTAs wire to Stripe Checkout through `@cue/sdk`. No new env vars are required for
 the web surface beyond the Phase 1 set.
+
+## Getting started — Phase 3 (Team / Enterprise)
+
+Phase 3 layers enterprise SSO/SCIM, org RBAC + an admin console, a shared team
+knowledge base, and per-seat Team billing on top of Phases 0–2. It is entirely
+**additive** — the consumer OAuth2 device-code PKCE path, personal documents,
+and the existing Stripe billing keep working unchanged. Enterprise SSO/SAML and
+SCIM directory sync are backed by **WorkOS** (`@workos-inc/node`); when the
+WorkOS env vars are unset, the SSO/SCIM surface simply fails loud on use and the
+PKCE path is unaffected.
+
+### New environment variables (WorkOS)
+
+All live in the repo-root `.env` (copy from `.env.example`). Phase 3 adds four
+server-only WorkOS secrets:
+
+| Var | Used by | Notes |
+| --- | --- | --- |
+| `WORKOS_API_KEY` | `@cue/api` `SsoModule` (WorkOS client) | `sk_test_…` / `sk_live_…`. Server-only. Every SSO/SCIM call throws if unset. |
+| `WORKOS_CLIENT_ID` | `@cue/api` `SsoModule` | `client_…`; used to build the AuthKit/SAML authorization URL. |
+| `WORKOS_WEBHOOK_SECRET` | `@cue/api` SCIM webhook | Verified against the **raw** request body of `POST /v1/scim/webhook` before any provisioning runs (WorkOS-signed). |
+| `WORKOS_REDIRECT_URI` | `@cue/api` SSO authorize/callback | Absolute callback WorkOS redirects to; defaults to `http://localhost:3001/v1/sso/callback`. |
+
+Get the API key + client id from the WorkOS dashboard, register the redirect URI
+there, and copy the directory-sync/webhook signing secret into
+`WORKOS_WEBHOOK_SECRET`.
+
+### SSO login (how it works)
+
+1. A user enters their work email on the web `/signin` page. The domain is
+   extracted (`features/sso-signin`) and the browser hits
+   `GET /v1/sso/authorize?domain=…` (or `orgId=…`), which resolves the org's
+   WorkOS connection and returns a WorkOS **AuthKit/SAML authorization URL**.
+2. The browser follows that URL to the customer's IdP; on success WorkOS
+   redirects to `WORKOS_REDIRECT_URI` → `GET /v1/sso/callback?code=…`.
+3. The callback exchanges the code for the WorkOS profile, **finds or creates**
+   the `users` row and its `orgMembers` membership (default role `member`), and
+   issues Cue's own ES256 JWT — the same token the rest of the API consumes.
+   From here the session is indistinguishable from a PKCE session.
+
+Admins manage the connection itself from the admin console (or the SDK
+`client.sso.createConnection / listConnections / deleteConnection`), which maps
+to the org-scoped, role-gated `…/sso/connections` routes.
+
+### SCIM provisioning / deprovisioning
+
+WorkOS Directory Sync posts signed events to `POST /v1/scim/webhook`. The
+webhook verifies the `WORKOS_WEBHOOK_SECRET` signature over the raw body, then
+provisions/deprovisions membership: `dsync.user.created` / `.updated` upsert the
+user + `orgMembers` row, `dsync.user.deleted` and
+`dsync.group.user_removed` deactivate/remove membership, and group events keep
+role/membership in sync. This is server-only — there is no SDK method for the
+webhook.
+
+### RBAC roles
+
+Org membership carries one of three roles (`orgRoleEnum` in `@cue/db`):
+
+- **owner** — full control incl. billing/seats and org deletion.
+- **admin** — manage members, invites, SSO connections, team-KB docs, settings.
+- **member** — use the product; read the shared team KB; no admin surface.
+
+Admin-sensitive routes are gated by a `@RequireRole('owner','admin')` decorator +
+`RequireRoleGuard` (resolved against the route's `:orgId` against the caller's
+`orgMembers.role`), stacked **after** the JWT guard. Feature availability
+(whether the org may use SSO/admin at all) stays gated by **entitlements** — the
+`team` entitlement — so RBAC answers "who" and entitlements answer "whether".
+
+### Admin console (web `/admin`)
+
+`apps/web` adds a role-protected admin console (reusing `@cue/sdk`):
+
+| Route | Purpose |
+| --- | --- |
+| `/signin` | SSO login entrypoint — "Sign in with SSO" by email domain. |
+| `/admin` | Org overview (members, seats, entitlement snapshot). |
+| `/admin/members` | Members + role management + invites (create / accept flow). |
+| `/admin/sso` | WorkOS SSO connection setup (create / list / delete). |
+| `/admin/settings` | Org settings. |
+| `/admin/billing` | Team seats + Stripe Customer Portal launcher. |
+
+### Shared team knowledge base
+
+Org documents are a **shared** team KB: any org member can retrieve
+`visibility = 'org'` chunks in RAG (retrieval is scoped by `orgId`, not
+`userId`), while `visibility = 'personal'` docs stay private to their uploader.
+Members read the shared KB; owners/admins manage it (list/remove via
+`…/orgs/:orgId/documents`). At session time `@cue/ai-orchestrator` retrieves
+against the session's org KB with the same org + visibility filter applied
+**before** the ANN scan. Migration `0002_team_kb` adds the `document_visibility`
+enum + column (defaulting existing rows to `org`, preserving Phase-2 behavior).
+
+### Team seat billing
+
+Team is a per-seat Stripe subscription: Checkout/subscription `quantity` tracks
+active `orgMembers`, and the `subscriptions.seats` column feeds usage limits
+(per-seat live-minute allowance). The admin billing panel reads seat usage and
+opens the Stripe Customer Portal for seat/plan management. The `team`
+entitlement gates the admin/SSO feature set.
+
+### Migrations
+
+Phase 3 adds two additive migrations, both registered in
+`packages/db/migrations/meta/_journal.json` and applied by the same command:
+
+```bash
+pnpm --filter @cue/db db:migrate   # runs 0001_enterprise + 0002_team_kb
+```
+
+`0001_enterprise` adds the `sso_connections` and `invitations` tables (+ their
+enums; `invitations.role` reuses `orgRoleEnum`, admin events reuse the existing
+`audit_logs` table). `0002_team_kb` adds the shared-KB `visibility` column.
+
+See [`services/README.md`](services/README.md) for the full Phase 3 endpoint map.

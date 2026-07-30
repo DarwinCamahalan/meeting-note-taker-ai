@@ -51,6 +51,18 @@ export const EnvSchema = z.object({
   STRIPE_PRICE_OVERAGE: z.string().optional(),
   /** Stripe Customer Portal configuration id (optional; pins allowed prices). */
   STRIPE_PORTAL_CONFIG_ID: z.string().optional(),
+
+  /* ---- Enterprise SSO/SCIM (WorkOS). All optional so the app boots without
+   * WorkOS in local dev; the SsoModule throws a clear error at call time when a
+   * required key is absent (fail-loud, never silently). ---- */
+  /** WorkOS API secret key (`sk_...`). */
+  WORKOS_API_KEY: z.string().optional(),
+  /** WorkOS client id (`client_...`) used to build authorization URLs. */
+  WORKOS_CLIENT_ID: z.string().optional(),
+  /** WorkOS webhook signing secret; verifies the SCIM directory-sync webhook. */
+  WORKOS_WEBHOOK_SECRET: z.string().optional(),
+  /** Absolute callback URL WorkOS redirects to (`GET /v1/sso/callback`). */
+  WORKOS_REDIRECT_URI: z.string().url().default('http://localhost:3001/v1/sso/callback'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
@@ -79,6 +91,10 @@ export class AppConfig {
   readonly stripePriceTeam: string | undefined;
   readonly stripePriceOverage: string | undefined;
   readonly stripePortalConfigId: string | undefined;
+  readonly workosApiKey: string | undefined;
+  readonly workosClientId: string | undefined;
+  readonly workosWebhookSecret: string | undefined;
+  readonly workosRedirectUri: string;
 
   constructor(env: Env) {
     this.nodeEnv = env.NODE_ENV;
@@ -100,6 +116,10 @@ export class AppConfig {
     this.stripePriceTeam = env.STRIPE_PRICE_TEAM;
     this.stripePriceOverage = env.STRIPE_PRICE_OVERAGE;
     this.stripePortalConfigId = env.STRIPE_PORTAL_CONFIG_ID;
+    this.workosApiKey = env.WORKOS_API_KEY;
+    this.workosClientId = env.WORKOS_CLIENT_ID;
+    this.workosWebhookSecret = env.WORKOS_WEBHOOK_SECRET;
+    this.workosRedirectUri = env.WORKOS_REDIRECT_URI;
     Object.freeze(this);
   }
 
