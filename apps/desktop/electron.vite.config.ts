@@ -6,9 +6,10 @@ import react from '@vitejs/plugin-react';
 // the main/preload output instead of externalizing so they load cleanly in the
 // (CommonJS) Electron main context. Their transitive SDK deps (@anthropic-ai,
 // @deepgram) are bundled too since they are not declared on @cue/desktop.
+// `ws` stays externalized (a plain declared dependency loaded from node_modules).
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: ['@cue/core', '@cue/types'] })],
+    plugins: [externalizeDepsPlugin({ exclude: ['@cue/core', '@cue/sdk', '@cue/types'] })],
     build: {
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/main/index.ts') },

@@ -142,6 +142,60 @@ body,
   outline-offset: 2px;
 }
 
+/* --- Header actions row --------------------------------------------------- */
+
+.overlay__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* --- Auth chip (Phase 1 sign-in affordance) ------------------------------- */
+
+.auth-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--cue-fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.auth-chip:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--cue-fg);
+}
+.auth-chip:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.auth-chip:focus-visible {
+  outline: 2px solid var(--cue-accent);
+  outline-offset: 2px;
+}
+
+.auth-chip__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cue-idle);
+}
+.auth-chip--signed_in .auth-chip__dot {
+  background: var(--cue-listening);
+}
+.auth-chip--authenticating .auth-chip__dot {
+  background: var(--cue-thinking);
+  animation: cue-pulse 1s ease-in-out infinite;
+}
+.auth-chip--error .auth-chip__dot {
+  background: var(--cue-error-dot);
+}
+
 /* --- Cue card (teleprompter) --------------------------------------------- */
 
 .cue-card {
@@ -223,6 +277,7 @@ body,
 @media (prefers-reduced-motion: reduce) {
   .status__dot--listening,
   .status__dot--thinking,
+  .auth-chip--authenticating .auth-chip__dot,
   .cue-card__caret {
     animation: none;
   }
