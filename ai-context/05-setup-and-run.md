@@ -28,8 +28,10 @@ All services read the **repo-root `.env`** (copy of [`../.env.example`](../.env.
 
 | Var | Consumer | If unset |
 |-----|----------|----------|
-| `ANTHROPIC_API_KEY` | Claude `claude-haiku-4-5` streaming cues | pipeline can't produce cues |
-| `DEEPGRAM_API_KEY` | Deepgram live STT | pipeline can't transcribe |
+| `ANTHROPIC_API_KEY` | Claude `claude-haiku-4-5` streaming cues | pipeline can't produce cues (**only required key**) |
+| `STT_PROVIDER` | `local-whisper` (free, offline, on-device — default) or `deepgram` (paid cloud) | `local-whisper` when no `DEEPGRAM_API_KEY`, else `deepgram` |
+| `WHISPER_MODEL` | local-whisper ggml model: `tiny.en`/`base.en`/`small.en`/… or a `.bin` path | `base.en` (downloaded on first use) |
+| `DEEPGRAM_API_KEY` | Deepgram live STT — **only when `STT_PROVIDER=deepgram`** | ignored; free local Whisper is used instead |
 
 ### Phase 1 — backend services
 
@@ -112,9 +114,25 @@ All services read the **repo-root `.env`** (copy of [`../.env.example`](../.env.
 ### Phase 0 — desktop overlay only (no backend)
 
 ```bash
-# set ANTHROPIC_API_KEY + DEEPGRAM_API_KEY in .env
+# set ANTHROPIC_API_KEY in .env (STT is free local Whisper by default — no
+# DEEPGRAM key needed). First run downloads the ggml model (~150 MB, cached).
 pnpm --filter @cue/desktop dev        # electron-vite dev server
 ```
+
+> **Native-module note (local-whisper in Electron):** `smart-whisper` is a native
+> addon; inside Electron's main process its ABI differs from system Node, so run
+> the rebuild **once** after install:
+>
+> ```bash
+> pnpm --filter @cue/desktop rebuild:native   # electron-rebuild -f -w smart-whisper
+> ```
+>
+> Then `pnpm --filter @cue/desktop dev` uses free local STT with no backend. It is
+> force-externalized in `electron.vite.config.ts` and `asarUnpack`ed at package
+> time (`electron-builder.yml`); electron-builder re-runs the ABI rebuild for the
+> `.dmg`/`.exe` (npmRebuild). If the addon still can't load, the client fails loud
+> (overlay error) and **gateway mode** (`CUE_BACKEND=gateway`, whisper in the
+> plain-Node `ai-orchestrator`) is the fallback.
 
 This is the whole product loop: audio → Deepgram → Claude → overlay. Pick the audio source in the overlay's **Me / Them / Both** selector:
 

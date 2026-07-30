@@ -22,7 +22,11 @@ export class OrchestratorService {
   create(start?: StartSession): CuePipeline {
     return createOrchestrator({
       anthropicApiKey: this.config.anthropicApiKey,
-      deepgramApiKey: this.config.deepgramApiKey,
+      sttProvider: this.config.sttProvider,
+      ...(this.config.deepgramApiKey ? { deepgramApiKey: this.config.deepgramApiKey } : {}),
+      ...(this.config.sttProvider === 'local-whisper'
+        ? { whisper: { model: this.config.whisperModel } }
+        : {}),
       ...this.ragConfig(start),
     });
   }

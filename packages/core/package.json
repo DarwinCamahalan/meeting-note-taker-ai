@@ -13,7 +13,9 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -24,6 +26,9 @@
     "@cue/observability": "workspace:*",
     "@cue/types": "workspace:*",
     "@deepgram/sdk": "^3.9.0"
+  },
+  "optionalDependencies": {
+    "smart-whisper": "^0.8.1"
   },
   "devDependencies": {
     "@cue/config": "workspace:*",
