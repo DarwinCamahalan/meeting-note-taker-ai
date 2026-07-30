@@ -1,9 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import type { AudioChunk, CueEvent, SessionState, TranscriptEvent } from '@cue/types';
 import { ClaudeCueClient } from '../llm/claude-cue-client.js';
+import type { RagConfig } from '../types.js';
+import {
+  SESSION_RAG_BUDGET,
+  serializeMatches,
+  trimMatches,
+  type RagContextProvider,
+} from '../rag/context-provider.js';
 import { DeepgramSttClient } from '../stt/deepgram-client.js';
 import type { CuePipeline, OrchestratorConfig } from '../types.js';
 import { RollingTranscript } from './context.js';
+
+/** Default hard cap on the one-per-session retrieval wait (latency guard). */
+const DEFAULT_RAG_BUDGET_MS = 400;
 
 /**
  * Wires STT -> LLM into the Phase 0 end-to-end thread.
@@ -32,10 +42,20 @@ export class CueOrchestrator implements CuePipeline {
   /** Aborts the currently-streaming cue when a newer one supersedes it. */
   private cueController: AbortController | undefined;
 
+  /* --- RAG (Phase 2, opt-in) --- */
+  private readonly rag: RagContextProvider | undefined;
+  private readonly ragBudgetMs: number;
+  /** Frozen, serialized session-stable RAG block (23 §4.1). */
+  private sessionRagBlock: string | undefined;
+  /** Retrieval is attempted exactly once per session, on the first real query. */
+  private ragPrimed = false;
+
   constructor(config: OrchestratorConfig) {
     this.stt = new DeepgramSttClient({ apiKey: config.deepgramApiKey });
     this.llm = new ClaudeCueClient({ apiKey: config.anthropicApiKey });
     this.stt.onTranscript((t) => this.handleTranscript(t));
+    this.rag = config.rag?.provider;
+    this.ragBudgetMs = ragBudget(config.rag);
   }
 
   async start(): Promise<void> {
@@ -56,6 +76,8 @@ export class CueOrchestrator implements CuePipeline {
     this.abortInFlightCue();
     await this.stt.stop();
     this.transcript.reset();
+    this.sessionRagBlock = undefined;
+    this.ragPrimed = false;
     this.setState('idle');
   }
 
@@ -91,6 +113,14 @@ export class CueOrchestrator implements CuePipeline {
     this.setState('thinking');
     const context = this.transcript.build();
 
+    // Ground the session once (budget-bounded) on the first real query; the
+    // frozen block is reused by every later cue so the cached prefix is stable.
+    await this.ensureSessionRag(context.rollingTranscript);
+    if (controller.signal.aborted) return;
+    if (this.sessionRagBlock) {
+      context.rag = { sessionBlock: this.sessionRagBlock };
+    }
+
     try {
       for await (const event of this.llm.streamCue(context, controller.signal)) {
         if (controller.signal.aborted) return;
@@ -108,6 +138,28 @@ export class CueOrchestrator implements CuePipeline {
       if (!controller.signal.aborted && this.started) {
         this.setState('listening');
       }
+    }
+  }
+
+  /**
+   * Attempt retrieval once per session, using the first non-empty transcript as
+   * the query. Bounded by {@link ragBudgetMs}; on timeout/error the session
+   * simply proceeds ungrounded (no regression to the cue path).
+   */
+  private async ensureSessionRag(query: string): Promise<void> {
+    if (!this.rag || this.ragPrimed) return;
+    const text = query.trim();
+    if (text.length === 0) return;
+    this.ragPrimed = true; // prime at most once, even if this attempt fails
+
+    try {
+      const result = await withTimeout(this.rag.retrieve(text), this.ragBudgetMs);
+      if (result && result.matches.length > 0) {
+        const trimmed = trimMatches(result.matches, SESSION_RAG_BUDGET);
+        if (trimmed.length > 0) this.sessionRagBlock = serializeMatches(trimmed);
+      }
+    } catch {
+      // Swallow: grounding is best-effort and must never block a cue.
     }
   }
 
@@ -136,4 +188,30 @@ export function createOrchestrator(cfg: OrchestratorConfig): CueOrchestrator {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Resolve the RAG wait budget, falling back to the default. */
+function ragBudget(rag: RagConfig | undefined): number {
+  const ms = rag?.budgetMs;
+  return ms !== undefined && ms > 0 ? ms : DEFAULT_RAG_BUDGET_MS;
+}
+
+/**
+ * Race a promise against a timeout, resolving to `undefined` on timeout. The
+ * underlying work is not cancelled — the caller just stops waiting on it.
+ */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
+  return new Promise<T | undefined>((resolve) => {
+    const timer = setTimeout(() => resolve(undefined), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(undefined);
+      },
+    );
+  });
 }
