@@ -146,6 +146,17 @@ gitGraph
 
 ---
 
+## Milestone: desktop packaging verified end-to-end (local, unsigned)
+
+**2026-07-30.** The Electron app now **compiles and packages into a real macOS artifact** on a dev machine — proving the toolchain, not just the source:
+
+- `electron-vite build` → `out/{main,preload,renderer}` (main 681 kB, renderer 568 kB, 194 modules).
+- `electron-builder --mac dir|dmg --arm64` → `release/mac-arm64/AssistMe.app` (341 MB) and `release/AssistMe-0.0.0-arm64.dmg` (106 MB) + `.blockmap` + `latest-mac.yml` (update feed manifest).
+- `Info.plist` verified: `CFBundleName=AssistMe`, `LSUIElement=true` (accessory app / no Dock icon — matches the always-on-top overlay), mic + camera `NS*UsageDescription` strings present.
+- **Enablement fixes** (committed): moved `electron` → `devDependencies` (electron-builder rejects it in `dependencies`); added `author`; added a **zero-dependency icon generator** `build/make-icon.py` → `build/icon.png` (indigo→violet brand gradient + cue-bubble glyph) from which electron-builder derives `.icns`/`.ico`.
+
+Unsigned / arm64 / single-arch is the **local dev/QA** build. The **signed + notarized + universal** build is CI-only (`release-desktop.yml`) and needs the Apple/Windows cert env vars documented in [`05-setup-and-run.md`](05-setup-and-run.md). Runtime still needs API keys (Phase 0) and, for gateway mode, the backend spine — the app launches and shows the protected overlay without them, but live cues require them. Artifacts live under `apps/desktop/release/` (gitignored).
+
 ## Cross-cutting: what never got built (and why)
 
 - **Legal / consent / recording-disclosure.** Explicitly **descoped** in PR #2 (`cc85267` removed `90-legal-compliance.md` and the legal audit). The residual recording-consent + GDPR risk is real and unresolved — preserved in git history, and the reason the loopback capture stub is deliberately gated. Do **not** re-introduce legal docs; document it as descoped. See [`07-todos-and-gaps.md`](07-todos-and-gaps.md#descoped-legal--consent) and [`04-plan-mapping.md`](04-plan-mapping.md#the-legal-descope).
