@@ -153,3 +153,137 @@ audio to `@cue/ws-gateway`, which relays it to `@cue/ai-orchestrator`. With
 
 See [`services/README.md`](services/README.md) for the service-to-doc/port map
 and the Phase 1 TODO list.
+
+## Getting started — Phase 2 (RAG, billing, signed auto-update)
+
+Phase 2 adds retrieval-augmented cues, Stripe billing + entitlements, a
+Three.js web hero, and a signed desktop auto-update / packaging path. All of it
+is **additive** — the Phase 0 local desktop pipeline and the Phase 1 gateway
+path keep working unchanged; RAG, billing, and auto-update are opt-in and
+degrade cleanly when their env vars are unset.
+
+### New environment variables
+
+All still live in the repo-root `.env` (copy from `.env.example`). Phase 2 adds:
+
+| Var | Used by | Notes |
+| --- | --- | --- |
+| `VOYAGE_API_KEY` | `@cue/core` `VoyageEmbeddingsClient`, `@cue/api` documents ingest, `@cue/ai-orchestrator` retrieval | `voyage-3.5`, 1024-d, matches `document_chunks.embedding vector(1024)`. Unset ⇒ RAG disabled (retrieval returns empty). |
+| `STRIPE_SECRET_KEY` | `@cue/api` Billing + Webhooks | `sk_test_…` in dev. Server-only. |
+| `STRIPE_WEBHOOK_SECRET` | `@cue/api` BillingWebhooks | `whsec_…`; verified against the **raw** request body before any reconciliation. |
+| `STRIPE_PRICE_PRO` / `STRIPE_PRICE_TEAM` / `STRIPE_PRICE_OVERAGE` | `@cue/api` Billing | Price ids from your Stripe account (see seeding below). Overage is the metered `$0.13/min` price. |
+| `STRIPE_PORTAL_CONFIG_ID` | `@cue/api` Billing | Optional `bpc_…` Customer Portal configuration; falls back to the account default. |
+| `UPDATE_MANIFEST_PUBLIC_KEY` | `apps/desktop` updater | Pinned **minisign** public key (base64), **distinct** from the artifact-host creds. The manifest signature is verified against this key *before* sha512 / OS code-signature. |
+| `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` | packaging (macOS notarize) | CI/local-cert only. When unset, the `afterSign` hook **skips** notarization instead of failing. |
+| `CSC_LINK` / `CSC_KEY_PASSWORD` | packaging (macOS signing) | Developer ID `.p12` (base64 or path). |
+| `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` | packaging (Windows signing) | `.pfx` (base64 or path). |
+
+Secrets are **env-only** — none are committed, and the packaging/notarize vars
+live in the `desktop-release` CI environment, never on a dev machine.
+
+### RAG: how document upload + retrieval work
+
+1. **Upload** — `POST /v1/documents` (authenticated) accepts inline extracted
+   text (`{ title, kind, content }`; presigned object-upload is a later flow).
+   `@cue/api` `DocumentsModule` runs: `chunkText` (from `@cue/core`) → embed each
+   chunk with `VoyageEmbeddingsClient` (`input_type: document`) → persist a
+   `documents` row + `document_chunks` rows (each with its `vector(1024)`
+   embedding). `GET /v1/documents` and `GET /v1/documents/:id` are org-scoped
+   reads. Via the SDK: `client.documents.upload / list / get`.
+2. **Retrieval** — the vector search is a **DB-agnostic port** (`VectorSearchPort`
+   in `@cue/core`); the pgvector-backed adapter (Drizzle cosine
+   `1 - (embedding <=> $q)`, **org-scoped before** the ANN scan, `topK`/`minScore`)
+   is implemented in the services (`services/api` and `services/ai-orchestrator`),
+   never in `@cue/core` (core stays free of `@cue/db`). At session time
+   `@cue/ai-orchestrator` embeds the query (`input_type: query`), retrieves
+   top-k `RagChunkMatch`es for the session's org, and injects them into the
+   Claude prompt per [`docs/23-prompt-context-spec.md`](docs/23-prompt-context-spec.md).
+   With `VOYAGE_API_KEY` unset, retrieval is a no-op and cues are generated
+   exactly as in Phase 1.
+
+### Billing: seeding Stripe products/prices
+
+Billing needs three Price ids in `.env`. Create them once in your Stripe test
+account (dashboard or CLI), then paste the ids in:
+
+```bash
+# Pro — flat $20/mo (recurring licensed)
+stripe products create --name "Cue Pro"
+stripe prices create --product <prod_pro> \
+  --unit-amount 2000 --currency usd -d "recurring[interval]=month"      # -> STRIPE_PRICE_PRO
+
+# Team — $30/seat/mo (recurring licensed, per-seat quantity)
+stripe products create --name "Cue Team"
+stripe prices create --product <prod_team> \
+  --unit-amount 3000 --currency usd -d "recurring[interval]=month"      # -> STRIPE_PRICE_TEAM
+
+# Overage — metered $0.13/live-minute, attached as a second subscription item
+stripe products create --name "Cue Live-Minute Overage"
+stripe prices create --product <prod_overage> --currency usd \
+  -d "recurring[interval]=month" -d "recurring[usage_type]=metered" \
+  -d "recurring[aggregate_usage]=sum" -d "billing_scheme=per_unit" \
+  -d "unit_amount_decimal=13"                                           # -> STRIPE_PRICE_OVERAGE
+```
+
+Free and Enterprise are **not** self-serve (no Checkout price). The tier ↔ price
+mapping lives only in `stripe.catalog.ts`, resolved from env — feature code
+never hard-codes ids.
+
+Flow: pricing CTAs on the web hit `client.billing.createCheckout` → Stripe
+hosted Checkout → success/cancel redirects. The **Customer Portal** link comes
+from `POST /v1/billing/portal`. Stripe events land on `POST /v1/billing/webhook`
+(raw-body signature verified → deduped by `event.id` → the reconciler updates
+`subscriptions` + `entitlements`). **Entitlements are the source of truth** for
+feature gates (`@RequireEntitlement(key)` guard); usage accumulates live-minutes
+in `usage_events`, reports metered usage to Stripe, and soft-warns / hard-caps /
+bills overage per [`docs/50-subscriptions-entitlements.md`](docs/50-subscriptions-entitlements.md).
+
+Local webhook testing:
+
+```bash
+stripe listen --forward-to localhost:3001/v1/billing/webhook   # prints the whsec_… -> STRIPE_WEBHOOK_SECRET
+```
+
+### Signed auto-update
+
+The desktop updater (`apps/desktop/src/main/updater.ts`) wraps `electron-updater`
+but gates it on an **independent minisign signature** over the release manifest
+(`latest*.yml`), verified against the pinned `UPDATE_MANIFEST_PUBLIC_KEY`
+**before** `electron-updater` runs its own sha512 + OS code-signature checks
+(per [`docs/05-remediation-plan.md`](docs/05-remediation-plan.md)). The signature
+math lives in a pure, unit-testable `update-verify.ts` (no Electron imports); a
+key-id mismatch, bad signature, or unreachable/absent `.minisig` takes the
+tamper-reject path and auto-update stays disabled. The web `/api/latest-release`
+route serves the normalized manifest and attaches the sibling `latest.yml.minisig`
+(`signature` + `signatureUrl`) from the `RELEASES_URL` feed; in local dev the
+bundled static-fallback manifest carries an empty signature.
+
+### Packaging (mac / win)
+
+`apps/desktop/electron-builder.yml` targets macOS (`dmg`, `universal`, hardened
+runtime + `build/entitlements.mac.plist` requesting microphone + camera; screen
+recording is OS-prompted) and Windows (`nsis`, `verifyUpdateCodeSignature`),
+publishing to a `generic` feed at `${env.RELEASES_URL}`.
+
+```bash
+pnpm --filter @cue/desktop package       # unsigned local build (both configured targets)
+pnpm --filter @cue/desktop package:mac    # macOS dmg   (--publish never)
+pnpm --filter @cue/desktop package:win    # Windows nsis (--publish never)
+pnpm --filter @cue/desktop publish        # build + publish to the release feed (CI)
+```
+
+macOS **notarization** (`build/notarize.cjs`, via `notarytool`) and code-signing
+(`CSC_LINK`/`CSC_KEY_PASSWORD`), and Windows signing
+(`WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD`), are **CI / local-cert steps**: they run
+only when the corresponding env vars are present and are otherwise skipped so a
+dev build never fails for missing certs. After electron-builder emits
+`latest*.yml`, the release pipeline minisign-signs it **out of band** with a key
+that lives only in CI — never alongside the R2/S3 artifact-host credentials.
+
+### Web hero (Three.js)
+
+`apps/web` renders a `@react-three/fiber` + `@react-three/drei` hero loaded via
+`next/dynamic({ ssr: false })` with a static poster fallback, honoring
+`prefers-reduced-motion` and code-split so it never bloats first paint. Pricing
+CTAs wire to Stripe Checkout through `@cue/sdk`. No new env vars are required for
+the web surface beyond the Phase 1 set.
