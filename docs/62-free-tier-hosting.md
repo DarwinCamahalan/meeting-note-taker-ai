@@ -59,6 +59,8 @@ Reset the database (re-runs migrations):
 docker compose down -v && docker compose up --build
 ```
 
+> **Verified 2026-07-30 (`docker compose up --build`):** postgres came up healthy with all 15 tables + `vector`/`pgcrypto` extensions (migrations auto-applied), redis healthy, `api` serving `/healthz → {"status":"ok"}`, and `ws-gateway` listening. `ai-orchestrator` **fail-loud-requires** `ANTHROPIC_API_KEY` + `DEEPGRAM_API_KEY` — it only boots once those are in `.env` (blank keys ⇒ it exits with `missing required env var ANTHROPIC_API_KEY`, by design). So a keyless stand-up is 4/5 up; add the two keys for 5/5.
+
 ### 3. Point the surfaces at it
 
 - **Web (local):** `NEXT_PUBLIC_API_BASE_URL=http://localhost:3001` in `.env`, then `pnpm --filter @cue/web dev`.
