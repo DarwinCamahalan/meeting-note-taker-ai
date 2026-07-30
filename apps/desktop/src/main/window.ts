@@ -1,15 +1,56 @@
 import { join } from 'node:path';
-import { app, BrowserWindow, screen } from 'electron';
+import { BrowserWindow, screen } from 'electron';
+import type { WindowView } from '@cue/types';
 
 /**
- * Create the content-protected Cue overlay window.
+ * Two windows share one renderer bundle, distinguished by a `?view=` query:
+ *   - `dashboard` — a normal framed control window (settings + Start Listening),
+ *     shown on launch.
+ *   - `overlay` — the transparent, frameless, always-on-top, content-protected
+ *     teleprompter HUD, created hidden and revealed when a session starts.
+ */
+
+function sharedWebPreferences(preloadPath: string) {
+  return {
+    preload: preloadPath,
+    sandbox: true,
+    contextIsolation: true,
+    nodeIntegration: false,
+  };
+}
+
+/** Load the renderer (dev server or built file) for a specific view. */
+function loadView(win: BrowserWindow, view: WindowView): void {
+  const devServerUrl = process.env['ELECTRON_RENDERER_URL'];
+  if (devServerUrl) {
+    void win.loadURL(`${devServerUrl}?view=${view}`);
+  } else {
+    void win.loadFile(join(__dirname, '../renderer/index.html'), { query: { view } });
+  }
+}
+
+/** The framed dashboard / settings window shown on launch. */
+export function createDashboardWindow(preloadPath: string): BrowserWindow {
+  const win = new BrowserWindow({
+    width: 940,
+    height: 680,
+    minWidth: 720,
+    minHeight: 560,
+    title: 'AssistMe',
+    show: false,
+    backgroundColor: '#0b0e13',
+    webPreferences: sharedWebPreferences(preloadPath),
+  });
+  loadView(win, 'dashboard');
+  win.once('ready-to-show', () => win.show());
+  return win;
+}
+
+/**
+ * Create the content-protected overlay window (created hidden; revealed by the
+ * dashboard's Start Listening → `cue:start-listening`).
  *
- * The overlay is a transparent, frameless, always-on-top HUD positioned as a
- * strip near the top of the primary display. It is excluded from screen
- * capture/recording/sharing so it stays invisible to the far side of a call.
- *
- * @param preloadPath Absolute path to the compiled preload script
- *                     (emitted by electron-vite at out/preload/index.js).
+ * @param preloadPath Absolute path to the compiled preload script.
  */
 export function createOverlayWindow(preloadPath: string): BrowserWindow {
   const primary = screen.getPrimaryDisplay();
@@ -21,7 +62,6 @@ export function createOverlayWindow(preloadPath: string): BrowserWindow {
   const win = new BrowserWindow({
     width: overlayWidth,
     height: overlayHeight,
-    // Centre horizontally, pinned just below the top of the work area.
     x: workX + Math.round((workWidth - overlayWidth) / 2),
     y: workY + 24,
     transparent: true,
@@ -30,49 +70,20 @@ export function createOverlayWindow(preloadPath: string): BrowserWindow {
     hasShadow: false,
     skipTaskbar: true,
     resizable: false,
-    // Reveal only once the renderer is ready, to avoid a transparent flash.
     show: false,
-    webPreferences: {
-      preload: preloadPath,
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
+    webPreferences: sharedWebPreferences(preloadPath),
   });
 
   // --- Content protection -------------------------------------------------
-  // setContentProtection(true) is the cross-platform switch that keeps this
-  // window out of screen capture:
-  //   - macOS:   sets the window's NSWindowSharingType to `none`.
-  //   - Windows: calls SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE).
-  // This excludes the WINDOW from capture/recording/share only. It does NOT
-  // hide the process from the OS, Activity Monitor / Task Manager, or any
-  // EDR / monitoring agent — Cue remains fully visible to the operating system.
+  // setContentProtection(true) keeps this window out of screen capture:
+  //   - macOS:   NSWindowSharingType = none.
+  //   - Windows: SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE).
+  // Excludes the WINDOW from capture/recording/share only — the process stays
+  // fully visible to the OS / Activity Monitor / Task Manager / EDR agents.
   win.setContentProtection(true);
-
-  // Float above full-screen apps and the screen saver, on every workspace.
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
-  // macOS: run as an accessory (agent) app — no Dock icon, no menu-bar focus
-  // stealing — so the overlay behaves like a HUD rather than a foreground app.
-  if (process.platform === 'darwin') {
-    app.dock?.hide();
-  }
-
-  // electron-vite serves the renderer from a dev server in `dev`, and emits a
-  // static bundle for production builds.
-  const devServerUrl = process.env['ELECTRON_RENDERER_URL'];
-  if (devServerUrl) {
-    void win.loadURL(devServerUrl);
-  } else {
-    void win.loadFile(join(__dirname, '../renderer/index.html'));
-  }
-
-  // Show without stealing focus so the user keeps typing in their real app.
-  win.once('ready-to-show', () => {
-    win.showInactive();
-  });
-
+  loadView(win, 'overlay');
   return win;
 }
