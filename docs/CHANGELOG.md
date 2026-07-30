@@ -16,6 +16,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **Legal/compliance docs deprioritized** — removed `90-legal-compliance.md` and the legal/compliance audit (`audits/05-legal-compliance-audit.md`) as out of scope for the current pass. The underlying recording-consent / GDPR risk is unresolved and preserved in git history; revisit before any production audio capture.
 
+## [0.4.0] - 2026-07-29
+
+### Added
+
+- **API contracts** ([22-api-contracts.md](22-api-contracts.md)) — canonical contract surface: REST/Zod schemas with code-generated DTOs, the **gRPC bidi** hot-path proto between `ws-gateway` and `ai-orchestrator`, and the versioned WebSocket message envelope.
+- **Prompt & context spec** ([23-prompt-context-spec.md](23-prompt-context-spec.md)) — RAG context assembly over **`voyage-3.5`@1024** retrieval, context-window budgeting, prompt-cache layering, and per-tier Claude model routing.
+- **Threat model** ([41-threat-model.md](41-threat-model.md)) — STRIDE/attack-surface analysis and trust boundaries covering per-org envelope encryption under KMS, KMS asymmetric JWT signing, the WS auth-ticket handshake, and supply-chain / signed-update integrity.
+- **Test plan** ([14-test-plan.md](14-test-plan.md)) — test strategy and coverage matrix, the **two-budget latency** release gate (server-controllable from endpointing + full user-perceived p95), and capture-invisibility / audio-pipeline harnesses.
+- **Phase 0 spike plan** ([81-phase-0-spike-plan.md](81-phase-0-spike-plan.md)) — de-risking spikes (capture-invisibility, gRPC bidi hot-path latency, STT/LLM two-budget validation) each with a hypothesis, method, and go/no-go exit criteria.
+
 ## [0.3.0] - 2026-07-29
 
 ### Added
@@ -79,7 +89,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   - Non-functional targets: live cue end-to-end latency < 1.2s p95, STT partials < 300ms, backend API p99 < 200ms (excluding LLM), 99.9% uptime, and overlay invisibility across Zoom/Meet/Teams/Webex on both OSes.
   - Responsible-use posture: acceptable-use policy, consent/compliance model, and a disclosed mode as launch-blocking requirements.
 
-[Unreleased]: https://example.com/cue/compare/v0.3.0...HEAD
+[Unreleased]: https://example.com/cue/compare/v0.4.0...HEAD
+[0.4.0]: https://example.com/cue/compare/v0.3.0...v0.4.0
 [0.3.0]: https://example.com/cue/compare/v0.2.0...v0.3.0
 [0.2.0]: https://example.com/cue/compare/v0.1.0...v0.2.0
 [0.1.0]: https://example.com/cue/releases/tag/v0.1.0
