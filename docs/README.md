@@ -13,7 +13,7 @@ This directory is the canonical planning set: product definition, architecture, 
 1. **Start with the [Executive Summary](00-executive-summary.md)** for the pitch, market, business model, and one-screen architecture.
 2. **Then [Product Vision](01-product-vision.md)** for personas, use cases, scope, and the responsible-use posture.
 3. **Then [System Architecture](02-system-architecture.md)** for the authoritative C4 views, data flow, sequence diagrams, and ADRs.
-4. **Drill into the domain docs** that matter to your role — client (10–13), backend & AI (20–21), data & auth (30–40), monetization (50–51, 71), infra & ops (60–61, 70).
+4. **Drill into the domain docs** that matter to your role — client (10–14), backend & AI (20–23), data, auth & security (30–41), monetization (50–51, 71), infra & ops (60–61, 70).
 5. **Read the [Roadmap](80-roadmap.md)** for the phase-gated delivery plan (Phase 0 spike → Phase 4 scale) and risk register.
 6. **Finish with the [Consolidated Audit Summary](audits/00-audit-summary.md)** — it is the single most important cross-cutting document before any build decision.
 
@@ -42,6 +42,7 @@ This directory is the canonical planning set: product definition, architecture, 
 | [11-web-landing.md](11-web-landing.md) | Next.js 15 + Three.js marketing site, download flow, and signed release-feed integration. |
 | [12-design-system.md](12-design-system.md) | Design language, tokens, components, overlay UX, accessibility, and motion. |
 | [13-engineering-standards.md](13-engineering-standards.md) | Code standards, code-splitting rules, testing, review, branching, and CI gates. |
+| [14-test-plan.md](14-test-plan.md) | Test strategy and coverage matrix — unit/integration/E2E, the two-budget latency release gate (server-controllable from endpointing + full user-perceived p95), capture-invisibility and audio-pipeline harnesses. |
 
 ### Backend & AI
 
@@ -49,6 +50,8 @@ This directory is the canonical planning set: product definition, architecture, 
 |-----|-------------|
 | [20-backend-services.md](20-backend-services.md) | Services (`api`, `ws-gateway`, `ai-orchestrator`, `entitlements`, `billing-webhooks`), API design, realtime gateway, and inter-service contracts. |
 | [21-ai-pipeline.md](21-ai-pipeline.md) | Deepgram STT + Claude (Haiku/Sonnet/Opus) + RAG streaming, latency budget, prompt design, and cost controls. |
+| [22-api-contracts.md](22-api-contracts.md) | Canonical contract surface — REST/Zod schemas, generated DTOs, the gRPC bidi hot-path proto between `ws-gateway` and `ai-orchestrator`, and WS envelope/versioning. |
+| [23-prompt-context-spec.md](23-prompt-context-spec.md) | Prompt + RAG context assembly spec — `voyage-3.5`@1024 retrieval, context window budgeting, prompt-cache layering, and per-tier model routing. |
 
 ### Data & Auth
 
@@ -56,6 +59,7 @@ This directory is the canonical planning set: product definition, architecture, 
 |-----|-------------|
 | [30-data-model.md](30-data-model.md) | PostgreSQL 16 schema (DDL), pgvector embeddings, Redis usage, migrations, RLS, and data lifecycle. |
 | [40-authentication.md](40-authentication.md) | AuthN/AuthZ, desktop OAuth 2.0 PKCE, device binding, RBAC, org/team model, sessions, and consent records. |
+| [41-threat-model.md](41-threat-model.md) | STRIDE/attack-surface threat model — per-org envelope encryption under KMS, KMS asymmetric JWT signing, WS auth-ticket handshake, supply-chain and signed-update trust boundaries. |
 
 ### Monetization
 
@@ -78,6 +82,7 @@ This directory is the canonical planning set: product definition, architecture, 
 | Doc | Description |
 |-----|-------------|
 | [80-roadmap.md](80-roadmap.md) | Phase-gated delivery plan (Phase 0 → 4), exit criteria, milestone gantt, hiring plan, risk register, and GTM sketch. |
+| [81-phase-0-spike-plan.md](81-phase-0-spike-plan.md) | Phase 0 de-risking spikes — capture-invisibility, gRPC bidi hot-path latency, STT/LLM two-budget validation — each with a hypothesis, method, and go/no-go exit criteria. |
 | [CHANGELOG.md](CHANGELOG.md) | Keep-a-Changelog-style history of the planning/documentation set. |
 
 ### Audits
