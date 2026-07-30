@@ -17,6 +17,14 @@ export interface OrchestratorEnv {
   readonly anthropicApiKey: string;
   /** Deepgram API key handed to `@cue/core` (live STT). */
   readonly deepgramApiKey: string;
+  /**
+   * Voyage AI key for `voyage-3.5` query embeddings. Optional: when unset (or
+   * DATABASE_URL is unset) RAG grounding is disabled and the pipeline runs the
+   * no-RAG path unchanged.
+   */
+  readonly voyageApiKey: string | undefined;
+  /** Postgres + pgvector connection string for RAG retrieval. Optional. */
+  readonly databaseUrl: string | undefined;
 }
 
 /** Fallback bind address when ORCHESTRATOR_GRPC_ADDR is unset. */
@@ -31,6 +39,8 @@ export function loadOrchestratorEnv(env: NodeJS.ProcessEnv = process.env): Orche
     grpcAddr: optional(env, 'ORCHESTRATOR_GRPC_ADDR') ?? DEFAULT_GRPC_ADDR,
     anthropicApiKey: required(env, 'ANTHROPIC_API_KEY'),
     deepgramApiKey: required(env, 'DEEPGRAM_API_KEY'),
+    voyageApiKey: optional(env, 'VOYAGE_API_KEY'),
+    databaseUrl: optional(env, 'DATABASE_URL'),
   };
 }
 

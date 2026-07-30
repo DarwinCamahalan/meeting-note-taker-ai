@@ -12,3 +12,10 @@ export * from './llm/claude-cue-client.js';
 export * from './orchestrator/context.js';
 export * from './orchestrator/cue-orchestrator.js';
 export * from './audio/loopback.js';
+
+/* Phase 2 — RAG: embeddings client + pure chunker + DB-agnostic retriever +
+   the orchestrator-facing context provider (seam + pure serialization). */
+export * from './embeddings/voyage-client.js';
+export * from './rag/chunker.js';
+export * from './rag/retriever.js';
+export * from './rag/context-provider.js';

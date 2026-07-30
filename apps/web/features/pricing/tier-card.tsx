@@ -1,5 +1,11 @@
 import Link from 'next/link';
+import { CheckoutButton } from './checkout-button';
 import type { BillingCycle, PricingTier } from './types';
+
+/** Self-serve, Stripe-checkoutable tiers (Free downloads; Enterprise is sales-led). */
+function isCheckoutTier(id: PricingTier['id']): id is 'pro' | 'team' {
+  return id === 'pro' || id === 'team';
+}
 
 function formatPrice(tier: PricingTier, cycle: BillingCycle): string {
   const value = cycle === 'monthly' ? tier.monthly : tier.annual;
@@ -39,7 +45,14 @@ export function TierCard({ tier, cycle }: { tier: PricingTier; cycle: BillingCyc
         <span className="text-sm text-white/50">{priceSuffix(tier, cycle)}</span>
       </div>
 
-      {isExternal ? (
+      {isCheckoutTier(tier.id) ? (
+        <CheckoutButton
+          tier={tier.id}
+          cycle={cycle}
+          label={tier.cta.label}
+          {...(tier.featured ? { featured: true } : {})}
+        />
+      ) : isExternal ? (
         <a href={tier.cta.href} className="btn-secondary mt-6 w-full">
           {tier.cta.label}
         </a>

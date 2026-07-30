@@ -1,26 +1,84 @@
 appId: com.cue.desktop
 productName: Cue
+copyright: Copyright © 2026 Cue
 directories:
   output: release
   buildResources: build
 files:
   - out/**/*
   - package.json
+# afterSign hook notarizes the macOS build via notarytool when Apple creds are
+# present in the env (see build/notarize.cjs). No-op on Windows / when unset.
+afterSign: build/notarize.cjs
+
+# ---------------------------------------------------------------------------
+# macOS — universal DMG, Hardened Runtime, notarization (§7.2)
+# ---------------------------------------------------------------------------
 mac:
   category: public.app-category.productivity
   target:
     - target: dmg
       arch:
         - universal
-  # Accessory app: no Dock icon (set at runtime via app.dock.hide()).
+  # Hardened Runtime is REQUIRED for notarization; entitlements declare the
+  # capabilities the app genuinely uses (mic / camera + Electron JIT).
+  hardenedRuntime: true
+  # Skip the local Gatekeeper assessment during signing — the build machine's
+  # policy is irrelevant; notarization is the real gate.
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Notarization is handled by the afterSign hook (build/notarize.cjs) so it can
+  # be skipped cleanly without Apple creds; keep electron-builder's built-in
+  # notarize OFF to avoid a double submission.
+  notarize: false
+  # Signing identity is auto-selected from the keychain / CSC_* env in CI.
+  # CI TODO: provide the Developer ID cert via CSC_LINK + CSC_KEY_PASSWORD
+  # (base64 .p12), and the notarytool creds via APPLE_ID /
+  # APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID (build/notarize.cjs).
   extendInfo:
+    # Accessory app: no Dock icon (also enforced at runtime via app.dock.hide()).
     LSUIElement: true
+    # TCC rationale strings shown in the macOS permission prompts. Screen
+    # Recording has no Info.plist key of its own — the prompt copy is
+    # OS-provided — but mic/camera do, and Apple rejects hardened builds that
+    # touch these devices without a usage description.
+    NSMicrophoneUsageDescription: >-
+      Cue listens to your meeting or interview audio to transcribe it and
+      generate real-time cues. Audio is processed for the active session only.
+    NSCameraUsageDescription: >-
+      Cue may use the camera for video-call awareness during a live session.
+      No video is recorded or stored.
+
+# ---------------------------------------------------------------------------
+# Windows — NSIS installer, code signing (§7.4)
+# ---------------------------------------------------------------------------
 win:
   target:
     - target: nsis
       arch:
         - x64
+  # Must match the CN on the code-signing cert for electron-updater's
+  # verifyUpdateCodeSignature check to pass.
+  publisherName: Cue Technologies Inc.
+  verifyUpdateCodeSignature: true
+  # CI TODO: signing is env-driven — electron-builder reads WIN_CSC_LINK
+  # (base64 .pfx or path) and WIN_CSC_KEY_PASSWORD from the environment. No
+  # cert material is ever committed. Azure Trusted Signing is the preferred
+  # production path (see 60-devops-infrastructure §7.4).
+
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+
+# ---------------------------------------------------------------------------
+# Update feed — generic provider pointed at the signed release channel.
+# ---------------------------------------------------------------------------
+# electron-builder publishes installers + latest*.yml here; the manifest is
+# then INDEPENDENTLY minisign-signed out of band (§7.7) and electron-updater
+# verifies that signature BEFORE trusting the sha512 in the manifest.
+publish:
+  - provider: generic
+    url: ${env.RELEASES_URL}
+    channel: latest

@@ -112,4 +112,12 @@ declare global {
  */
 export * from './api.js';
 
+/**
+ * Phase 2 contract surface. `billing.js` = subscriptions / entitlements /
+ * usage / Stripe DTOs; `documents.js` = RAG documents / chunks / retrieval.
+ * Both are additive and do not shadow any Phase 0/1 export.
+ */
+export * from './billing.js';
+export * from './documents.js';
+
 export {};

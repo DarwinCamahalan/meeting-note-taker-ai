@@ -1,4 +1,5 @@
 import type { AudioChunk, CueEvent, SessionState, TranscriptEvent } from '@cue/types';
+import type { RagContextProvider } from './rag/context-provider.js';
 
 /**
  * The runnable AI pipeline consumed by the Electron main process.
@@ -16,10 +17,27 @@ export interface CuePipeline {
   onCue(cb: (e: CueEvent) => void): void;
 }
 
+/**
+ * Optional RAG grounding for a session (Phase 2). Entirely opt-in: when absent,
+ * the pipeline behaves exactly as the Phase 0/1 no-RAG path (no extra I/O, and
+ * the Claude prompt bytes are unchanged so prompt caching is unaffected).
+ */
+export interface RagConfig {
+  /** Tenant-bound retrieval seam (org + documentId scoping lives in the adapter). */
+  provider: RagContextProvider;
+  /**
+   * Max wall-clock the pipeline waits for the (one-per-session) retrieval before
+   * proceeding without it — a hard latency guard. Default 400 ms.
+   */
+  budgetMs?: number;
+}
+
 /** Credentials required to construct the pipeline. Read from env in main. */
 export interface OrchestratorConfig {
   anthropicApiKey: string;
   deepgramApiKey: string;
+  /** Optional RAG grounding; omit for the local/no-RAG path. */
+  rag?: RagConfig;
 }
 
 /**
@@ -34,4 +52,18 @@ export interface CueContext {
   rollingTranscript: string;
   /** The most recent final transcript events retained in the rolling window. */
   recentFinals: TranscriptEvent[];
+  /**
+   * Optional RAG grounding (Phase 2). `sessionBlock` is the frozen, serialized
+   * session-stable context injected as a cached system block (23 §4.1);
+   * absent on the no-RAG path.
+   */
+  rag?: CueRagContext;
+}
+
+/** Serialized RAG blocks partitioned by prompt-cache volatility (23 §4.1). */
+export interface CueRagContext {
+  /** Frozen session-stable block for the cached system prefix. */
+  sessionBlock?: string;
+  /** Volatile per-cue block merged into the (non-cached) user turn. */
+  hotBlock?: string;
 }

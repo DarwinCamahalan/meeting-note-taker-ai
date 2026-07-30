@@ -12,7 +12,13 @@
  */
 import type { AuthTokens } from '@cue/types';
 import { HttpClient, type FetchLike } from './http-client.js';
-import { AuthResource, SessionsResource, UsersResource } from './resources.js';
+import {
+  AuthResource,
+  BillingResource,
+  DocumentsResource,
+  SessionsResource,
+  UsersResource,
+} from './resources.js';
 
 export interface CueApiClientOptions {
   baseUrl: string;
@@ -27,6 +33,8 @@ export interface CueApiClientOptions {
 export class CueApiClient {
   readonly auth: AuthResource;
   readonly sessions: SessionsResource;
+  readonly documents: DocumentsResource;
+  readonly billing: BillingResource;
   private readonly users: UsersResource;
   private readonly http: HttpClient;
 
@@ -46,6 +54,8 @@ export class CueApiClient {
 
     this.auth = new AuthResource(this.http);
     this.sessions = new SessionsResource(this.http);
+    this.documents = new DocumentsResource(this.http);
+    this.billing = new BillingResource(this.http);
     this.users = new UsersResource(this.http);
   }
 
@@ -89,4 +99,10 @@ export class CueApiClient {
 export { CueApiError, isProblemDetails } from './errors.js';
 export { HttpClient } from './http-client.js';
 export type { FetchLike, HttpClientOptions, RequestOptions } from './http-client.js';
-export { AuthResource, SessionsResource, UsersResource } from './resources.js';
+export {
+  AuthResource,
+  BillingResource,
+  DocumentsResource,
+  SessionsResource,
+  UsersResource,
+} from './resources.js';

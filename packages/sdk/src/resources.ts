@@ -4,15 +4,23 @@
  */
 import type {
   AuthTokens,
+  CheckoutSessionRequest,
+  CheckoutSessionResponse,
   CreateSessionRequest,
+  Document,
+  DocumentUploadRequest,
+  DocumentUploadResponse,
+  EntitlementsResponse,
   ListSessionsQuery,
   MeResponse,
   Paginated,
   PkceExchangeRequest,
   PkceStartRequest,
   PkceStartResponse,
+  PortalLinkResponse,
   RefreshRequest,
   Session,
+  UsageSummary,
   WsTicket,
 } from '@cue/types';
 import type { HttpClient } from './http-client.js';
@@ -74,5 +82,59 @@ export class UsersResource {
   /** `GET /v1/me` — the authenticated user, active org, and roles. */
   me(): Promise<MeResponse> {
     return this.http.get<MeResponse>('/v1/me');
+  }
+
+  /** `GET /v1/me/entitlements` — the resolved feature-gate snapshot. */
+  entitlements(): Promise<EntitlementsResponse> {
+    return this.http.get<EntitlementsResponse>('/v1/me/entitlements');
+  }
+}
+
+export class DocumentsResource {
+  constructor(private readonly http: HttpClient) {}
+
+  /** `POST /v1/documents` — upload text; server chunks, embeds, and persists. */
+  upload(body: DocumentUploadRequest, opts?: { idempotencyKey?: string }): Promise<DocumentUploadResponse> {
+    return this.http.post<DocumentUploadResponse>('/v1/documents', {
+      body,
+      idempotency: true,
+      ...(opts?.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
+    });
+  }
+
+  /** `GET /v1/documents` — cursor-paginated list of the org's documents. */
+  list(query?: { cursor?: string; limit?: number }): Promise<Paginated<Document>> {
+    return this.http.get<Paginated<Document>>('/v1/documents', {
+      query: { cursor: query?.cursor, limit: query?.limit },
+    });
+  }
+
+  /** `GET /v1/documents/:id` — read one document record. */
+  get(id: string): Promise<Document> {
+    return this.http.get<Document>(`/v1/documents/${encodeURIComponent(id)}`);
+  }
+}
+
+export class BillingResource {
+  constructor(private readonly http: HttpClient) {}
+
+  /** `POST /v1/billing/checkout` — start a Stripe Checkout session. */
+  createCheckout(body: CheckoutSessionRequest): Promise<CheckoutSessionResponse> {
+    return this.http.post<CheckoutSessionResponse>('/v1/billing/checkout', { body, idempotency: true });
+  }
+
+  /** `POST /v1/billing/portal` — mint a Stripe Customer Portal link. */
+  portalLink(): Promise<PortalLinkResponse> {
+    return this.http.post<PortalLinkResponse>('/v1/billing/portal', { idempotency: true });
+  }
+
+  /** `GET /v1/me/entitlements` — the resolved feature-gate snapshot. */
+  getEntitlements(): Promise<EntitlementsResponse> {
+    return this.http.get<EntitlementsResponse>('/v1/me/entitlements');
+  }
+
+  /** `GET /v1/billing/usage` — the current period's live-minute usage summary. */
+  usageSummary(): Promise<UsageSummary> {
+    return this.http.get<UsageSummary>('/v1/billing/usage');
   }
 }

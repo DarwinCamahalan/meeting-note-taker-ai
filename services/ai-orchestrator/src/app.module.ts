@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ORCHESTRATOR_CONFIG, loadOrchestratorEnv } from './config/env.js';
 import { GrpcServerService } from './grpc/grpc-server.service.js';
 import { OrchestratorService } from './orchestrator/orchestrator.service.js';
+import { RagService } from './rag/rag.service.js';
 
 /**
  * The lean ai-orchestrator application: config loading + the pipeline factory +
@@ -17,6 +18,7 @@ import { OrchestratorService } from './orchestrator/orchestrator.service.js';
   ],
   providers: [
     { provide: ORCHESTRATOR_CONFIG, useFactory: () => loadOrchestratorEnv() },
+    RagService,
     OrchestratorService,
     GrpcServerService,
   ],

@@ -38,6 +38,51 @@ desktop ──ws────▶ @cue/ws-gateway     (JWT ticket auth, binary aud
 - Zod schemas in `@cue/api` are the **source of truth**; DTO types are derived
   into `@cue/types` — do not hand-edit the mirror.
 
+## Phase 2 surface (`@cue/api`)
+
+Phase 2 adds five NestJS modules to `@cue/api` (all under the existing `:3001`
+BFF). RAG retrieval on the session hot path lives in `@cue/ai-orchestrator`.
+
+### Documents (RAG ingest) — `DocumentsModule`
+
+| Method + route | Auth | Purpose |
+| --- | --- | --- |
+| `POST /v1/documents` | JWT | Upload inline text → `chunkText` → embed (`voyage-3.5`, `input_type: document`) → persist `documents` + `document_chunks` (each `vector(1024)`). Returns `DocumentUploadResponse`. |
+| `GET /v1/documents` | JWT | Org-scoped paginated list (`Paginated<Document>`). |
+| `GET /v1/documents/:id` | JWT | Org-scoped single `Document`. |
+
+`PgVectorSearchService` implements `@cue/core`'s `VectorSearchPort` (cosine
+`1 - (embedding <=> $q)`, org filter **before** the ANN scan, `topK`/`minScore`).
+The identical port is implemented in `@cue/ai-orchestrator` (`rag/`) for the
+session hot path, which embeds the query (`input_type: query`), retrieves top-k
+`RagChunkMatch`es, and injects them into the Claude prompt per `docs/23`.
+
+### Billing — `BillingModule` / `BillingWebhooksModule` / `UsageModule`
+
+| Method + route | Auth | Purpose |
+| --- | --- | --- |
+| `POST /v1/billing/checkout` | JWT | Stripe hosted-Checkout URL for a self-serve tier (`pro`/`team`); returns `CheckoutSessionResponse`. |
+| `POST /v1/billing/portal` | JWT | Stripe Customer Portal link (`PortalLinkResponse`). |
+| `GET /v1/billing/usage` | JWT | Current-period live-minute ledger + enforcement state + overage economics (`UsageSummary`). |
+| `POST /v1/billing/webhook` | **Stripe-signed** (raw body) | `NestFactory({ rawBody: true })` → verify `stripe-signature` → dedupe `event.id` → reconcile `subscriptions` + `entitlements` → fast-ack `200`. Bad signature ⇒ hard `400`. |
+
+Tier ↔ Price mapping is resolved from env in `stripe.catalog.ts` (Pro `$20`,
+Team `$30/seat`, metered overage `$0.13/min`); Free/Enterprise are not
+self-serve. Usage accumulates in `usage_events`, reports metered usage to
+Stripe, and soft-warns / hard-caps / bills overage per `docs/50`.
+
+### Entitlements — `EntitlementsModule`
+
+| Method + route | Auth | Purpose |
+| --- | --- | --- |
+| `GET /v1/me/entitlements` | JWT | Resolved feature-gate snapshot (`EntitlementsResponse`); `version` matches the WS `entitlements.updated` bump. |
+
+The `entitlements` table is the **source of truth** for feature gates. The
+`@RequireEntitlement(key)` decorator + `RequireEntitlementGuard` (Reflector reads
+`REQUIRE_ENTITLEMENT_METADATA_KEY`) gate any protected route. SDK:
+`client.billing.createCheckout / portalLink / getEntitlements / usageSummary`,
+`client.documents.upload / list / get`, `client.users.entitlements()`.
+
 ## Phase 1 TODOs (carried forward)
 
 - **Real IdP** — the `/activate` flow auto-approves a dev user. Swap for

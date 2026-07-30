@@ -1,11 +1,14 @@
 import Link from 'next/link';
 import { SITE } from '@/lib/config/site';
-import { OverlayMock } from './overlay-mock';
+import { Hero3D } from '@/components/hero/Hero3D';
 
 /**
- * Landing hero. Lightweight, RSC-safe, no WebGL — the R3F hero lands in Phase 2
- * (docs/11-web-landing.md §4). The decorative visual is pure CSS/SVG so the
- * product story is fully legible without any client JS.
+ * Landing hero. This Server Component holds the crawlable H1 + value-prop copy
+ * and CTAs; the decorative WebGL visual is the client-only, code-split
+ * {@link Hero3D} (three/@react-three loaded via `next/dynamic ssr:false`, with a
+ * static poster fallback for reduced-motion / offscreen / no-WebGL clients).
+ * No `three` import reaches this file, so the initial route JS stays lean
+ * (docs/11-web-landing.md §4).
  */
 export function Hero() {
   return (
@@ -40,7 +43,7 @@ export function Hero() {
           </p>
         </div>
 
-        <OverlayMock />
+        <Hero3D />
       </div>
     </section>
   );

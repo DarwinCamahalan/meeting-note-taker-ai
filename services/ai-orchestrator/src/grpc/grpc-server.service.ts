@@ -55,7 +55,7 @@ export class GrpcServerService implements OnModuleInit, OnModuleDestroy {
   private handlers(): OrchestratorHandlers {
     return {
       Stream: (call: grpc.ServerDuplexStream<ClientEnvelope, ServerEnvelope>) => {
-        const session = new StreamSession(call, () => this.orchestrators.create());
+        const session = new StreamSession(call, (start) => this.orchestrators.create(start));
         call.on('data', (envelope: ClientEnvelope) => session.handleEnvelope(envelope));
         call.on('end', () => {
           void session.finish();
