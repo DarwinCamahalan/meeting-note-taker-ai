@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Native system-audio loopback (desktop)** — AssistMe can now hear the *other* participants, not just the local mic, via Electron `getDisplayMedia` + a main-process `audio:'loopback'` handler (ScreenCaptureKit macOS 13+ / WASAPI Windows, no native addon). A **Me / Them / Both** selector mixes mic + system into one 16 kHz stream, gated behind a **one-time in-app consent disclosure**. Implementation: [`apps/desktop/src/main/loopback.ts`](../apps/desktop/src/main/loopback.ts) + renderer `audio/capture-streams.ts`.
 - **Local $0 backend stack** ([`../docker-compose.yml`](../docker-compose.yml)) — Postgres 16 + pgvector (migrations auto-apply on first init), Redis, and all three services (`api`, `ws-gateway`, `ai-orchestrator`) health-gated, so the desktop app runs in `gateway` mode entirely locally for free. Compose config validated.
 - **Free-tier hosting runbook** ([`62-free-tier-hosting.md`](62-free-tier-hosting.md)) — Neon (Postgres+pgvector) + Upstash (Redis) + Render (Docker services) so the deployed Vercel web gets a live backend at $0, with cold-start/limit caveats and a cost table. The cheap stand-in for the paid Terraform infra in [`60-devops-infrastructure.md`](60-devops-infrastructure.md).
 - **`CORS_ORIGINS`** — comma-separated allowed-origins env on `api` so a hosted backend can accept the deployed web origin without overloading `WEB_BASE_URL`.

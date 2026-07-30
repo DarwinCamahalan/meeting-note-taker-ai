@@ -3,6 +3,7 @@ import { app, BrowserWindow } from 'electron';
 import type { CuePipeline } from '@cue/core';
 import type { SessionKind } from '@cue/types';
 import { createOverlayWindow } from './window';
+import { registerDisplayMediaHandler } from './loopback';
 import { createPipeline, resolveBackend, type CueBackend } from './pipeline-runner';
 import { AuthManager } from './auth';
 import { registerIpc } from './ipc';
@@ -57,6 +58,11 @@ async function bootstrap(): Promise<void> {
   const preloadPath = join(__dirname, '../preload/index.js');
 
   overlayWindow = createOverlayWindow(preloadPath);
+
+  // Route renderer getDisplayMedia() to a system-audio loopback track so the
+  // capture pipeline can hear the far side of the call (consent-gated in the
+  // renderer). Registered once, on the overlay's (default) session.
+  registerDisplayMediaHandler();
 
   const apiBaseUrl = process.env['CUE_API_BASE_URL'] ?? 'http://localhost:3001';
   auth = new AuthManager({ apiBaseUrl });

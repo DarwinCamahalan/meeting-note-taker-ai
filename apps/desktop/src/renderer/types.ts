@@ -17,15 +17,24 @@ export interface CueVm {
   status: CueStatus;
 }
 
-/** Imperative handle returned by the microphone capture hook. */
+/**
+ * Which audio AssistMe listens to:
+ *   - `mic`    — only the local user's microphone (privacy-safest default).
+ *   - `system` — only system-audio loopback (the other participants).
+ *   - `both`   — mic + system mixed into one stream (full conversation).
+ * `system` and `both` require the one-time consent gate.
+ */
+export type AudioSource = 'mic' | 'system' | 'both';
+
+/** Imperative handle returned by the audio capture hook. */
 export interface AudioCapture {
-  /** True while the mic is open and PCM is flowing to the main process. */
+  /** True while capture is open and PCM is flowing to the main process. */
   capturing: boolean;
   /** Last capture error (e.g. permission denied), or `null`. */
   error: string | null;
-  /** Open the mic and begin streaming 16 kHz mono PCM. */
-  start(): Promise<void>;
-  /** Tear down the mic graph and release the device. */
+  /** Open the selected source(s) and begin streaming 16 kHz mono PCM. */
+  start(source: AudioSource): Promise<void>;
+  /** Tear down the capture graph and release all devices/streams. */
   stop(): void;
 }
 

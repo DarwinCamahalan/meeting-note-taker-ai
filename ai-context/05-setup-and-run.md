@@ -116,7 +116,13 @@ All services read the **repo-root `.env`** (copy of [`../.env.example`](../.env.
 pnpm --filter @cue/desktop dev        # electron-vite dev server
 ```
 
-This is the whole product loop: mic → Deepgram → Claude → overlay. **Only microphone capture works** — system-audio loopback is stubbed (see [`07-todos-and-gaps.md`](07-todos-and-gaps.md)).
+This is the whole product loop: audio → Deepgram → Claude → overlay. Pick the audio source in the overlay's **Me / Them / Both** selector:
+
+- **Me** — your microphone only (default; no extra permission).
+- **Them** — system-audio **loopback**, i.e. the other participants (ScreenCaptureKit on macOS 13+, WASAPI on Windows, via Electron — no native addon).
+- **Both** — mic + system mixed into one stream (the full conversation).
+
+Choosing **Them** or **Both** shows a one-time **consent disclosure** before capture starts. On **macOS**, system audio also requires **Screen Recording** permission — grant it under *System Settings → Privacy & Security → Screen Recording* and relaunch (the overlay surfaces a clear message if the loopback track is empty). Implementation: [`main/loopback.ts`](../apps/desktop/src/main/loopback.ts) + [`renderer/audio/capture-streams.ts`](../apps/desktop/src/renderer/audio/capture-streams.ts); see [`07-todos-and-gaps.md`](07-todos-and-gaps.md).
 
 ### Phase 1+ — the backend spine
 
