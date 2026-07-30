@@ -7,9 +7,20 @@ import react from '@vitejs/plugin-react';
 // (CommonJS) Electron main context. Their transitive SDK deps (@anthropic-ai,
 // @deepgram) are bundled too since they are not declared on @cue/desktop.
 // `ws` stays externalized (a plain declared dependency loaded from node_modules).
+//
+// `smart-whisper` is FORCE-externalized: it is a native (.node) addon for the
+// free local STT provider that cannot be bundled by rollup. It is a declared
+// optionalDependency of @cue/desktop, rebuilt for Electron's ABI via
+// `@electron/rebuild`, and asar-unpacked at package time (see electron-builder.yml)
+// so the .node is loadable from node_modules at runtime.
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: ['@cue/core', '@cue/sdk', '@cue/types'] })],
+    plugins: [
+      externalizeDepsPlugin({
+        exclude: ['@cue/core', '@cue/sdk', '@cue/types'],
+        include: ['smart-whisper'],
+      }),
+    ],
     build: {
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/main/index.ts') },
