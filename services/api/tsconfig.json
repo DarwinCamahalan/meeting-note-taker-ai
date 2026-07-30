@@ -1,0 +1,15 @@
+{
+  "extends": "@cue/config/tsconfig.base.json",
+  "// note": "NestJS needs decorator metadata; verbatimModuleSyntax is incompatible with emitDecoratorMetadata (type-only imports get elided before metadata is read), so it is disabled for this service only. Everything else inherits the canonical base.",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "lib": ["ES2023"],
+    "types": ["node"],
+
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "verbatimModuleSyntax": false
+  },
+  "include": ["src"]
+}

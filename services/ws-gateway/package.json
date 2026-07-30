@@ -1,0 +1,28 @@
+{
+  "name": "@cue/ws-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cue realtime edge: WS server (first-message JWT ticket auth) bridging binary audio + JSON control to the ai-orchestrator gRPC bidi stream.",
+  "main": "./dist/main.js",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../../.env src/main.ts",
+    "start": "node --env-file-if-exists=../../.env dist/main.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@cue/proto": "workspace:*",
+    "@cue/types": "workspace:*",
+    "jose": "^5.9.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@cue/config": "workspace:*",
+    "@types/node": "^22.9.0",
+    "@types/ws": "^8.5.12",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3"
+  }
+}
