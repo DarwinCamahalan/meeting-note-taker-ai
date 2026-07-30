@@ -21,6 +21,9 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // Compile the workspace TypeScript packages the web imports from source
+  // (not prebuilt) so Vercel/Next build them without a separate prebuild step.
+  transpilePackages: ['@cue/types', '@cue/sdk'],
   // Tree-shake drei's helper barrel so only the primitives the hero uses ship
   // in the lazy 3D chunk (docs/11-web-landing.md §4.4).
   experimental: {

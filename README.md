@@ -540,3 +540,55 @@ anchor the desktop updater verifies before `electron-updater` runs.
 
 See [`services/README.md`](services/README.md) for the per-service `/metrics` +
 health surface and the container images.
+
+---
+
+## Deploy the web app to Vercel
+
+The `apps/web` Next.js site (landing, pricing, download, activate, admin console,
+`/api/latest-release`) is Vercel-ready. This gives you a public URL to test the
+**marketing/download/admin surface**. Note: backend-dependent actions (real
+Stripe Checkout, device activation, SSO) need the `api` service + Postgres hosted
+separately — the static/marketing pages render without them.
+
+> ⚠️ **Deploy from the `dev` branch.** `main` is intentionally the held plan-docs
+> baseline and contains **no application code** — the built app lives on `dev`.
+> A deploy from `main` will fail. Set the Vercel Production Branch to `dev`.
+
+### One-click (button)
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FDarwinCamahalan%2Fmeeting-note-taker-ai&root-directory=apps%2Fweb&project-name=cue-web&repository-name=cue-web)
+
+The button clones the repo's **default branch**. Because the code is on `dev`, the
+button is best used **after** you promote `dev` → `main` (or make `dev` the
+default branch). For a private repo staying on `dev`, use the manual import below.
+
+### Manual import (recommended for this private repo)
+
+1. **Vercel → Add New → Project → Import Git Repository** → `DarwinCamahalan/meeting-note-taker-ai`.
+2. **Framework Preset:** Next.js. **Root Directory:** `apps/web` — and enable
+   **"Include source files outside of the Root Directory in the Build Step"**
+   (needed for the pnpm workspace + `@cue/*` packages).
+3. **Settings → Git → Production Branch:** `dev`.
+4. Vercel uses `apps/web/vercel.json` (install `pnpm install --frozen-lockfile`,
+   build `pnpm run build`). `next.config.ts` already `transpilePackages` the
+   `@cue/*` deps, so no prebuild step is required.
+5. **Environment Variables** (all optional for the marketing site — add when you
+   wire the hosted backend):
+   - `NEXT_PUBLIC_API_URL` — base URL of the hosted `api` service (for Checkout / activation)
+   - `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST` — product analytics
+   - `RELEASES_URL` — release manifest for the download page (`/api/latest-release`)
+   - `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` — optional error tracking (build is inert without them)
+6. **Deploy** → you get `https://cue-web-<hash>.vercel.app`.
+
+### What works on the deployed URL
+
+| Works standalone | Needs the hosted backend + DB |
+|---|---|
+| Landing, pricing, download pages, 3D hero | Real Stripe Checkout (needs `api` + Stripe keys) |
+| `/api/latest-release` (with `RELEASES_URL`) | Device activation / login (needs `api` auth) |
+| Admin console shell / routing | Live org/member/SSO data (needs `api` + Postgres) |
+
+To make the backend-dependent flows work, host `services/api` (+ Postgres with
+pgvector, Redis) — see [`infra/`](infra/) (Terraform) and
+[`services/README.md`](services/README.md) — and set `NEXT_PUBLIC_API_URL`.
