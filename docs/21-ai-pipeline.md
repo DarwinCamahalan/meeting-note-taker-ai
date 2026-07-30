@@ -2,7 +2,7 @@
 
 > Status: Draft · Owner: Principal Architect (AI/ML) · Last updated: 2026-07-29 · Related: [System architecture](02-system-architecture.md) · [Backend services](20-backend-services.md) · [Data model](30-data-model.md) · [Entitlements](50-subscriptions-entitlements.md) · [Unit economics](71-unit-economics.md) · [Observability](61-observability.md) · [Product vision](01-product-vision.md)
 
-This is the authoritative spec for **Cue**'s AI pipeline — the path from spoken audio to a glanceable cue in the overlay. It owns: the streaming topology (VAD → STT → context assembly → Claude → overlay), the two-budget latency model (server-controllable e2e p95 < ~900 ms SLO + full user-perceived e2e p95 < 1.2 s reported, §4), Claude model routing and prompt-cache strategy, the RAG retrieval design, prompt engineering for cues, cost-control levers, and AI safety/grounding. The service that runs all of this is **`ai-orchestrator`** (see [Backend services §ai-orchestrator](20-backend-services.md)); the transport into and out of it is **`ws-gateway`**. This doc does not re-derive per-user COGS — that math lives in [Unit economics](71-unit-economics.md); it does not define the DB schema — that lives in [Data model](30-data-model.md).
+This is the authoritative spec for **AssistMe**'s AI pipeline — the path from spoken audio to a glanceable cue in the overlay. It owns: the streaming topology (VAD → STT → context assembly → Claude → overlay), the two-budget latency model (server-controllable e2e p95 < ~900 ms SLO + full user-perceived e2e p95 < 1.2 s reported, §4), Claude model routing and prompt-cache strategy, the RAG retrieval design, prompt engineering for cues, cost-control levers, and AI safety/grounding. The service that runs all of this is **`ai-orchestrator`** (see [Backend services §ai-orchestrator](20-backend-services.md)); the transport into and out of it is **`ws-gateway`**. This doc does not re-derive per-user COGS — that math lives in [Unit economics](71-unit-economics.md); it does not define the DB schema — that lives in [Data model](30-data-model.md).
 
 ---
 
@@ -10,7 +10,7 @@ This is the authoritative spec for **Cue**'s AI pipeline — the path from spoke
 
 1. **Latency is the product.** The user glances at a cue mid-sentence. A correct cue that arrives 2s late is useless. Latency is governed by **two budgets** from a single start point — end-of-utterance endpointing — a **server-controllable e2e p95 < ~900 ms** (the SLO) and a **full user-perceived e2e p95 < 1.2 s** (reported-only, client network excluded); see §4. Every model/prompt choice is judged first on latency.
 2. **Stream everything.** Partial STT transcripts, partial LLM tokens. Nothing waits for a final result when a partial is actionable.
-3. **Grounded or silent.** A cue is grounded in retrieved user context (resume, JD, knowledge base) and the live transcript, or it is suppressed. Cue never invents an employer, a metric, or a fact the user did not provide. See §8.
+3. **Grounded or silent.** A cue is grounded in retrieved user context (resume, JD, knowledge base) and the live transcript, or it is suppressed. AssistMe never invents an employer, a metric, or a fact the user did not provide. See §8.
 4. **Cheap by default, deep on demand.** Live cues run on the cheapest model that clears the quality bar (Haiku 4.5). Sonnet 5 and Opus 5 are reserved for the moments that justify their cost (§5).
 5. **Cache the stable, send only the delta.** The system prompt + user profile + RAG context are a cacheable prefix; only the rolling transcript tail changes per request (§6).
 
@@ -138,7 +138,7 @@ Budget guardrails:
 
 ## 5. Claude model routing
 
-Cue uses three Claude models. The router (`ai-orchestrator`) picks per-request based on **mode**, **entitlement tier**, and **latency class**.
+AssistMe uses three Claude models. The router (`ai-orchestrator`) picks per-request based on **mode**, **entitlement tier**, and **latency class**.
 
 | Model | Exact model ID | Input $/1M | Output $/1M | Context | Thinking | Used for |
 |-------|----------------|-----------|------------|---------|----------|----------|
@@ -242,7 +242,7 @@ Cache TTL is ~5 minutes (ephemeral); a continuous call refreshes it on every cue
 
 ## 7. RAG — retrieval over user documents
 
-Cue grounds cues in the user's own uploaded material: **resume**, **job description (JD)**, and a **knowledge base** (product docs, FAQs, past-call notes for sales/support). Ownership of the schema is in [Data model §documents & embeddings](30-data-model.md); this section owns the retrieval *logic*.
+AssistMe grounds cues in the user's own uploaded material: **resume**, **job description (JD)**, and a **knowledge base** (product docs, FAQs, past-call notes for sales/support). Ownership of the schema is in [Data model §documents & embeddings](30-data-model.md); this section owns the retrieval *logic*.
 
 ### 7.1 Ingestion (offline, on upload)
 
@@ -310,7 +310,7 @@ A cue is not an essay. The system prompt constrains the model hard:
 
 ```text
 SYSTEM (excerpt):
-You are Cue, a private real-time copilot visible ONLY to the user.
+You are AssistMe, a private real-time copilot visible ONLY to the user.
 Output a single glanceable cue (<=25 words) that helps the user's NEXT sentence.
 Rules:
 - Ground every specific fact in USER PROFILE or KNOWLEDGE. Never invent employers,
@@ -366,7 +366,7 @@ Failover is **per-session** and transparent: the orchestrator holds a small ring
 
 ## 11. Safety, grounding & refusal handling
 
-- **Grounding as the primary guardrail:** the prompt (§8) forbids ungrounded specifics; the assembly layer clearly separates trusted context from live speech. This is Cue's main defense against fabricated facts — a wrong number in an interview is worse than no cue.
+- **Grounding as the primary guardrail:** the prompt (§8) forbids ungrounded specifics; the assembly layer clearly separates trusted context from live speech. This is AssistMe's main defense against fabricated facts — a wrong number in an interview is worse than no cue.
 - **Refusals:** if Claude declines (rare for this benign task), the orchestrator maps the refusal to a neutral overlay state ("No suggestion") rather than surfacing refusal prose. Refusals are logged (rate-monitored) but never shown raw.
 - **No PII exfiltration in prompts:** only the user's *own* uploaded documents and their *own* live transcript enter the prompt. Nothing from other users. Model-training opt-out is set on the Anthropic account (canonical security posture).
 - **Injection resistance:** the live transcript is *untrusted input* (another party may say "ignore your instructions"). The system prompt is fenced and the transcript is clearly labeled as speech-to-quote, not instructions; the orchestrator does not execute any tool calls derived from transcript content on the live path.

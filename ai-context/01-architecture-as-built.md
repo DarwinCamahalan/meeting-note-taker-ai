@@ -4,7 +4,7 @@
 
 ## The one thing to understand first: two pipelines, one interface
 
-Cue has **two** audio→cue pipelines that implement the **same** `CuePipeline` interface (`@cue/core`, `packages/core/src/types.ts`). The desktop app picks one at startup from the `CUE_BACKEND` env var (`apps/desktop/src/main/pipeline-runner.ts`):
+AssistMe has **two** audio→cue pipelines that implement the **same** `CuePipeline` interface (`@cue/core`, `packages/core/src/types.ts`). The desktop app picks one at startup from the `CUE_BACKEND` env var (`apps/desktop/src/main/pipeline-runner.ts`):
 
 | Backend | `CUE_BACKEND` | What runs | When |
 |---------|---------------|-----------|------|
@@ -229,7 +229,7 @@ RAG activates **only when both `VOYAGE_API_KEY` and `DATABASE_URL` are set** on 
 
 ## Cross-links
 
-- What Cue is, product surfaces → [`00-overview.md`](00-overview.md)
+- What AssistMe is, product surfaces → [`00-overview.md`](00-overview.md)
 - The 12 workspaces + dependency graph → [`02-monorepo-map.md`](02-monorepo-map.md)
 - Per-service internals (modules, endpoints, gRPC) → [`reference/services.md`](reference/services.md)
 - The `@cue/core` pipeline, reliability wrappers, RAG internals → [`reference/packages.md`](reference/packages.md)

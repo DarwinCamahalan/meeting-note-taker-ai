@@ -2,7 +2,7 @@
 
 > Status: Draft · Owner: Principal Architect (Platform) + Finance · Last updated: 2026-07-29 · Related: [AI pipeline](21-ai-pipeline.md) · [Subscriptions & entitlements](50-subscriptions-entitlements.md) · [Payments (Stripe)](51-payments-stripe.md) · [Scalability](70-scalability.md) · [Roadmap](80-roadmap.md)
 
-This doc owns the **money-per-user math**: what a live minute of Cue costs to serve, gross margin modelled against the **paid usage distribution segmented by persona** (not a whole-base average), the free-tier acquisition cost on a **cohort** basis, a **bottom-up opex + true cash break-even** (including S&M/CAC), and a **per-persona** LTV/CAC — and it explains **why the [canonical pricing](50-subscriptions-entitlements.md) works** and how model routing + prompt caching + minute caps + metered overage defend the margin.
+This doc owns the **money-per-user math**: what a live minute of AssistMe costs to serve, gross margin modelled against the **paid usage distribution segmented by persona** (not a whole-base average), the free-tier acquisition cost on a **cohort** basis, a **bottom-up opex + true cash break-even** (including S&M/CAC), and a **per-persona** LTV/CAC — and it explains **why the [canonical pricing](50-subscriptions-entitlements.md) works** and how model routing + prompt caching + minute caps + metered overage defend the margin.
 
 It does not define the tiers or entitlement enforcement ([Subscriptions & entitlements](50-subscriptions-entitlements.md)), the Stripe plumbing ([Payments](51-payments-stripe.md)), or the AI routing itself ([AI pipeline](21-ai-pipeline.md)) — it consumes them.
 
@@ -15,7 +15,7 @@ It does not define the tiers or entitlement enforcement ([Subscriptions & entitl
 
 ## 1. The one-sentence thesis
 
-> **A live minute of Cue costs ~1.5¢ to serve; caching + Haiku routing keep LLM cost below STT cost, so per-minute COGS is bounded — but gross margin is a *usage* story, and usage is a *persona* story: light personas (accessibility ~72%) subsidise heavy ones (job seekers ~38% before overage), so blended Pro margin lands ~40–50%, not 70%. The model hinges on the *minute cap + $0.13/min overage* turning the heavy tail from a loss into the most profitable cohort.**
+> **A live minute of AssistMe costs ~1.5¢ to serve; caching + Haiku routing keep LLM cost below STT cost, so per-minute COGS is bounded — but gross margin is a *usage* story, and usage is a *persona* story: light personas (accessibility ~72%) subsidise heavy ones (job seekers ~38% before overage), so blended Pro margin lands ~40–50%, not 70%. The model hinges on the *minute cap + $0.13/min overage* turning the heavy tail from a loss into the most profitable cohort.**
 
 ---
 

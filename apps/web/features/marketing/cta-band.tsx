@@ -10,7 +10,7 @@ export function CtaBand() {
           className="pointer-events-none absolute inset-0 bg-[radial-gradient(50%_80%_at_50%_0%,color-mix(in_oklch,var(--color-cue-500)_30%,transparent),transparent)]"
         />
         <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-          Bring Cue to your next call
+          Bring AssistMe to your next call
         </h2>
         <p className="mx-auto mt-4 max-w-xl text-lg text-white/70">
           Download, sign in, and you&rsquo;re listening in under a minute. Free

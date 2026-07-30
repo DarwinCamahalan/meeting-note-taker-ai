@@ -22,7 +22,7 @@ export function OverlayMock() {
         <div className="mt-5 rounded-xl border border-cue-500/30 bg-cue-500/10 p-4">
           <div className="flex items-center gap-2 text-xs font-medium text-cue-200">
             <SparkGlyph />
-            Cue
+            AssistMe
           </div>
           <p className="mt-2 text-sm leading-relaxed text-white/90">
             Lead with the STAR structure: the outage scope, your triage steps,

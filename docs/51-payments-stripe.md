@@ -1,8 +1,8 @@
-# Cue — Payments (Stripe Integration)
+# AssistMe — Payments (Stripe Integration)
 
 > Status: Draft · Owner: Platform / Billing Architect · Last updated: 2026-07-29 · Related: [Subscriptions & Entitlements](50-subscriptions-entitlements.md) · [Authentication](40-authentication.md) · [Backend Services](20-backend-services.md) · [Data Model](30-data-model.md) · [Unit Economics](71-unit-economics.md) · [DevOps](60-devops-infrastructure.md)
 
-> **Cue** is a provisional working title. All brand references are placeholders.
+> **AssistMe** (formerly Cue) is a provisional working title. All brand references are placeholders.
 
 ---
 
@@ -22,12 +22,12 @@ Configured in Stripe (Test + Live), managed as code via a seeding script (`packa
 
 | Product | Price nickname | Interval | Amount | Stripe price type | Env var |
 |---------|---------------|----------|--------|-------------------|---------|
-| Cue Pro | `pro_monthly` | month | $20.00 | recurring licensed | `STRIPE_PRICE_PRO_MONTHLY` |
-| Cue Pro | `pro_annual` | year | $200.00 | recurring licensed | `STRIPE_PRICE_PRO_ANNUAL` |
-| Cue Team | `team_monthly` | month | $30.00 / seat | recurring licensed, `quantity`=seats | `STRIPE_PRICE_TEAM_MONTHLY` |
-| Cue Team | `team_annual` | year | $300.00 / seat | recurring licensed | `STRIPE_PRICE_TEAM_ANNUAL` |
+| AssistMe Pro | `pro_monthly` | month | $20.00 | recurring licensed | `STRIPE_PRICE_PRO_MONTHLY` |
+| AssistMe Pro | `pro_annual` | year | $200.00 | recurring licensed | `STRIPE_PRICE_PRO_ANNUAL` |
+| AssistMe Team | `team_monthly` | month | $30.00 / seat | recurring licensed, `quantity`=seats | `STRIPE_PRICE_TEAM_MONTHLY` |
+| AssistMe Team | `team_annual` | year | $300.00 / seat | recurring licensed | `STRIPE_PRICE_TEAM_ANNUAL` |
 | Overage minutes | `overage_minutes` | month | $0.13 / min (canonical) | **recurring metered**, `usage_type=metered`, `aggregate_usage=sum` | `STRIPE_PRICE_OVERAGE_MINUTES` |
-| Cue Enterprise | `enterprise_custom` | custom | quote | recurring, negotiated | created per-deal |
+| AssistMe Enterprise | `enterprise_custom` | custom | quote | recurring, negotiated | created per-deal |
 
 Notes:
 - **Annual = 2 months free** is baked into the annual amounts (10× monthly). No coupon needed.
@@ -85,10 +85,10 @@ async createCheckout(userId: string, priceId: string, seats = 1) {
 ```
 
 Key points:
-- `client_reference_id` + `subscription_data.metadata.userId` let the webhook attribute the subscription to a Cue account deterministically.
+- `client_reference_id` + `subscription_data.metadata.userId` let the webhook attribute the subscription to an AssistMe account deterministically.
 - Metered overage item is added at Checkout so it exists before any overage occurs.
 - `automatic_tax` + `tax_id_collection` → Stripe Tax handles VAT/GST/sales tax and reverse-charge for B2B.
-- One Stripe **Customer** per Cue billing subject (user for Pro, org for Team), created idempotently and stored on the subject.
+- One Stripe **Customer** per AssistMe billing subject (user for Pro, org for Team), created idempotently and stored on the subject.
 
 ---
 
@@ -263,14 +263,14 @@ sequenceDiagram
 ## 9. Refunds & chargebacks
 
 - **Refunds** are issued via Stripe Dashboard or `refunds.create` by billing ops (not self-serve). A full refund of the *current* period triggers a `charge.refunded` handler that may downgrade to Free immediately; partial/goodwill refunds leave entitlements untouched. Refund policy language is owned by the legal/compliance doc.
-- **Chargebacks** (`charge.dispute.created`): flag the account, alert billing ops, submit evidence via Stripe (Cue is Stripe-hosted so we rely on Stripe's dispute flow). Repeat-dispute accounts can be restricted from re-subscribing (fraud control). We track dispute rate as a health metric (target < 0.5%, well under Stripe's 0.75% threshold).
+- **Chargebacks** (`charge.dispute.created`): flag the account, alert billing ops, submit evidence via Stripe (AssistMe is Stripe-hosted so we rely on Stripe's dispute flow). Repeat-dispute accounts can be restricted from re-subscribing (fraud control). We track dispute rate as a health metric (target < 0.5%, well under Stripe's 0.75% threshold).
 - **Involuntary churn is minimized upstream** by the card-less-trial choice ([Subscriptions ADR-50-03](50-subscriptions-entitlements.md#9-key-decisions-adr)) — no surprise charges means far fewer disputes.
 
 ---
 
 ## 10. PCI posture
 
-- Cue is **PCI DSS SAQ-A** eligible: all card data entry happens on **Stripe-hosted** surfaces (Checkout, Customer Portal). Card numbers, CVCs, and full PANs **never touch Cue servers, logs, or the desktop app**. We store only Stripe object IDs (`cus_…`, `sub_…`, `pi_…`) and last-4/brand as returned by Stripe for display.
+- AssistMe is **PCI DSS SAQ-A** eligible: all card data entry happens on **Stripe-hosted** surfaces (Checkout, Customer Portal). Card numbers, CVCs, and full PANs **never touch AssistMe servers, logs, or the desktop app**. We store only Stripe object IDs (`cus_…`, `sub_…`, `pi_…`) and last-4/brand as returned by Stripe for display.
 - No custom card form, no Stripe Elements holding raw PAN in our DOM, no card data in URLs or query strings (aligns with global privacy rules). Redirect-based Checkout keeps the card surface entirely on Stripe's domain.
 - Webhook endpoint is signature-verified (§5.2); `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` live in AWS Secrets Manager (see [DevOps](60-devops-infrastructure.md)), never in the repo, never in the desktop bundle. The desktop app calls **only** `api` for billing initiation and holds **no** Stripe secret.
 - Entering card details manually on the user's behalf is a **prohibited action** for the assistant/product flows; all payment entry is user-driven on Stripe's hosted page.

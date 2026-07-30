@@ -2,7 +2,7 @@
 
 > Status: Draft · Owner: Principal Architect (Platform) · Last updated: 2026-07-29 · Related: [Product vision](01-product-vision.md) · [Repository structure](03-repository-structure.md) · [Desktop app](10-desktop-app.md) · [Backend services](20-backend-services.md) · [AI pipeline](21-ai-pipeline.md) · [Data model](30-data-model.md) · [Authentication](40-authentication.md) · [Entitlements](50-subscriptions-entitlements.md) · [Observability](61-observability.md) · [Scalability](70-scalability.md)
 
-This is the authoritative high-level architecture for **Cue** (provisional brand), a cross-platform real-time AI meeting & interview copilot. It defines the system boundaries, the services and their contracts, the critical real-time data flow with its latency budget, the cross-cutting concerns every service inherits, and the load-bearing architecture decisions (ADRs). Each subsystem links to the doc that owns its detail — this doc does not duplicate them.
+This is the authoritative high-level architecture for **AssistMe** (provisional brand; formerly Cue), a cross-platform real-time AI meeting & interview copilot. It defines the system boundaries, the services and their contracts, the critical real-time data flow with its latency budget, the cross-cutting concerns every service inherits, and the load-bearing architecture decisions (ADRs). Each subsystem links to the doc that owns its detail — this doc does not duplicate them.
 
 ---
 
@@ -24,7 +24,7 @@ flowchart TB
     user(["End user<br/>(interviewee / sales / meeting host)"])
     admin(["Team / Enterprise admin"])
 
-    subgraph cue["Cue platform"]
+    subgraph cue["AssistMe platform"]
         desktop["Desktop app<br/>(Electron overlay)"]
         web["Marketing + account web<br/>(Next.js)"]
         backend["Backend services<br/>(api, ws-gateway,<br/>ai-orchestrator, entitlements,<br/>billing-webhooks)"]

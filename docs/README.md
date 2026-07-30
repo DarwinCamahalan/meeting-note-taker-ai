@@ -1,8 +1,8 @@
-# Cue — Architecture & Business Plan
+# AssistMe — Architecture & Business Plan
 
 > Status: Draft · Owner: Architecture · Last updated: 2026-07-29
 
-**Cue** (provisional brand) is a cross-platform (macOS + Windows) real-time AI meeting and interview copilot. It runs as a private, always-on-top, transparent teleprompter overlay that is excluded from screen capture and screen-share pickers using OS-level content-protection APIs. Cue captures both sides of a live conversation (system/loopback audio + microphone), transcribes it in under 300ms, and streams RAG-grounded AI cues, talking points, and live notes into the overlay — visible only to the user, at **< 1.2s end-to-end p95**. It targets interview preparation and confidence, sales/support copiloting, meeting note-taking, and accessibility.
+**AssistMe** (provisional brand; formerly Cue) is a cross-platform (macOS + Windows) real-time AI meeting and interview copilot. It runs as a private, always-on-top, transparent teleprompter overlay that is excluded from screen capture and screen-share pickers using OS-level content-protection APIs. AssistMe captures both sides of a live conversation (system/loopback audio + microphone), transcribes it in under 300ms, and streams RAG-grounded AI cues, talking points, and live notes into the overlay — visible only to the user, at **< 1.2s end-to-end p95**. It targets interview preparation and confidence, sales/support copiloting, meeting note-taking, and accessibility.
 
 This directory is the canonical planning set: product definition, architecture, delivery plan, and four independent due-diligence audits. Everything here is a **Draft** planning artifact, not shipped software.
 
@@ -131,4 +131,4 @@ This directory is the canonical planning set: product definition, architecture, 
 
 ## Responsible use & compliance
 
-> Legal, compliance, and consent are **out of scope for the current planning pass**, and the dedicated legal docs have been removed from this set. Stated honestly: the underlying risk is real and unresolved — Cue captures the other party's voice, which carries recording-consent and GDPR exposure in all-party-consent jurisdictions (≈12 U.S. states and much of the EU). This must be formalized (consent model, disclosed mode, sub-processor DPAs) **before any production audio capture**. Prior legal analysis remains recoverable in git history.
+> Legal, compliance, and consent are **out of scope for the current planning pass**, and the dedicated legal docs have been removed from this set. Stated honestly: the underlying risk is real and unresolved — AssistMe captures the other party's voice, which carries recording-consent and GDPR exposure in all-party-consent jurisdictions (≈12 U.S. states and much of the EU). This must be formalized (consent model, disclosed mode, sub-processor DPAs) **before any production audio capture**. Prior legal analysis remains recoverable in git history.

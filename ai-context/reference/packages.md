@@ -180,7 +180,7 @@ chunker / retriever / context-provider); then Phase 4 `reliability/index.js`.
 
 ## `@cue/db`
 
-**Path:** `packages/db/` · **Purpose:** Cue's data layer — the Drizzle schema
+**Path:** `packages/db/` · **Purpose:** AssistMe's data layer — the Drizzle schema
 (Postgres 16 + pgvector), a typed pg-backed client, and SQL migrations. Drizzle
 is the single source of truth for DB row types (docs/30 §4).
 

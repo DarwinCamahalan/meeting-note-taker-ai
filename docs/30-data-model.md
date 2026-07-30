@@ -2,7 +2,7 @@
 
 > Status: Draft · Owner: Principal Architect (Data) · Last updated: 2026-07-29 · Related: [System architecture](02-system-architecture.md) · [Backend services](20-backend-services.md) · [AI pipeline](21-ai-pipeline.md) · [Authentication](40-authentication.md) · [Entitlements](50-subscriptions-entitlements.md) · [Payments](51-payments-stripe.md) · [Observability](61-observability.md) · [Scalability](70-scalability.md) · [Unit economics](71-unit-economics.md)
 
-This is the authoritative data-layer specification for **Cue** (provisional brand). It owns the PostgreSQL 16 schema (as concrete Drizzle DDL), the pgvector embedding strategy, the Redis key map, the object-storage layout, the migration workflow, multi-tenancy isolation, and the full data lifecycle / retention / GDPR posture. Service-level access patterns are summarized here and owned by [Backend services](20-backend-services.md); the recording-consent and legal posture is owned by the legal/compliance doc (see [Product vision → responsible use](01-product-vision.md)).
+This is the authoritative data-layer specification for **AssistMe** (provisional brand; formerly Cue). It owns the PostgreSQL 16 schema (as concrete Drizzle DDL), the pgvector embedding strategy, the Redis key map, the object-storage layout, the migration workflow, multi-tenancy isolation, and the full data lifecycle / retention / GDPR posture. Service-level access patterns are summarized here and owned by [Backend services](20-backend-services.md); the recording-consent and legal posture is owned by the legal/compliance doc (see [Product vision → responsible use](01-product-vision.md)).
 
 ---
 
@@ -556,8 +556,8 @@ r2://cue-user-uploads-{us|eu}/
 r2://cue-releases/                                       # PUBLIC-read via CDN, region-agnostic
   desktop/latest-mac.yml
   desktop/latest.yml
-  desktop/{version}/Cue-{version}-{arch}.dmg
-  desktop/{version}/Cue-Setup-{version}.exe
+  desktop/{version}/AssistMe-{version}-{arch}.dmg
+  desktop/{version}/AssistMe-Setup-{version}.exe
 ```
 
 | Bucket | Contents | Access | Region | Lifecycle |

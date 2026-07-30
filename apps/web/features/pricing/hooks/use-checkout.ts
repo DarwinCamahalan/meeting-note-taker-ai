@@ -25,7 +25,7 @@ function intervalFor(cycle: BillingCycle): BillingInterval {
 
 function messageFor(err: unknown): string {
   if (err instanceof CueApiError && (err.status === 401 || err.status === 403)) {
-    return 'Please sign in from the Cue app to upgrade your plan.';
+    return 'Please sign in from the AssistMe app to upgrade your plan.';
   }
   return 'We could not start checkout. Please try again or download the app to upgrade.';
 }

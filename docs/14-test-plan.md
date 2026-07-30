@@ -2,7 +2,7 @@
 
 > Status: Draft · Owner: Principal Engineer (Quality & Release) · Last updated: 2026-07-29 · Related: [Engineering standards](13-engineering-standards.md) · [Desktop app](10-desktop-app.md) · [AI pipeline](21-ai-pipeline.md) · [Backend services](20-backend-services.md) · [Observability](61-observability.md) · [Remediation plan](05-remediation-plan.md) · [Decision record](04-decision-record.md)
 
-This document deepens the testing strategy sketched in [Engineering standards §4](13-engineering-standards.md) into an executable QA plan for **Cue**. §4 there sets the pyramid, tooling, and coverage floors; this doc specifies *how* each layer is written, *which* release gates block a tag, *how* the two hardest gates (content-protection invisibility and the two-budget latency gate) are mechanized, and how every gate wires into CI. It does not restate the CI pipeline diagram (owned by [§5.2 there](13-engineering-standards.md)) or the SLO catalog (owned by [Observability §9](61-observability.md)) — it consumes both.
+This document deepens the testing strategy sketched in [Engineering standards §4](13-engineering-standards.md) into an executable QA plan for **AssistMe**. §4 there sets the pyramid, tooling, and coverage floors; this doc specifies *how* each layer is written, *which* release gates block a tag, *how* the two hardest gates (content-protection invisibility and the two-budget latency gate) are mechanized, and how every gate wires into CI. It does not restate the CI pipeline diagram (owned by [§5.2 there](13-engineering-standards.md)) or the SLO catalog (owned by [Observability §9](61-observability.md)) — it consumes both.
 
 Two principles frame everything below, inherited from the product's shape:
 
@@ -150,7 +150,7 @@ it("round-trips the 4-byte audio frame header", () => {
 
 ## 4. Content-protection verification matrix (release blocker)
 
-Overlay invisibility is Cue's core promise ([Desktop app §5](10-desktop-app.md)). It is verified two ways, both gating the desktop tag: a **fast static assertion** on every desktop E2E run, and a **frame-capture matrix** on representative hardware pre-release.
+Overlay invisibility is AssistMe's core promise ([Desktop app §5](10-desktop-app.md)). It is verified two ways, both gating the desktop tag: a **fast static assertion** on every desktop E2E run, and a **frame-capture matrix** on representative hardware pre-release.
 
 **Static assertion (every desktop E2E run).** Before any session can start, `BrowserWindow.isContentProtected()` must be `true`, and on Windows the direct `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` belt-and-suspenders call ([ADR-10.2](10-desktop-app.md)) must have been applied. This is cheap and catches the common regression — a refactor that drops the re-assert on `show`/display-change.
 

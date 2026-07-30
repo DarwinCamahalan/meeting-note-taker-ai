@@ -1,10 +1,10 @@
 # 00 — Overview (As-Built)
 
-> For future AI: this is the plain-language "what is this repo" file. It states what Cue is, what has actually been built (5 phases on `dev`), the surfaces a user touches, and the high-level shape. Deeper detail lives in the sibling files — this one stays at altitude. Read [`../AGENTS.md`](../AGENTS.md) first.
+> For future AI: this is the plain-language "what is this repo" file. It states what AssistMe is, what has actually been built (5 phases on `dev`), the surfaces a user touches, and the high-level shape. Deeper detail lives in the sibling files — this one stays at altitude. Read [`../AGENTS.md`](../AGENTS.md) first.
 
-## What Cue is
+## What AssistMe is
 
-**Cue** (a provisional working title — every brand reference is a placeholder) is a cross-platform **macOS + Windows** real-time **AI meeting/interview copilot**. It runs as a private, always-on-top, transparent teleprompter **overlay** on the user's own screen that is **excluded from screen capture and screen-share pickers** using OS content-protection APIs (`setContentProtection(true)` → macOS `NSWindowSharingType=none`, Windows `WDA_EXCLUDEFROMCAPTURE`).
+**AssistMe** (a provisional working title, formerly Cue — every brand reference is a placeholder) is a cross-platform **macOS + Windows** real-time **AI meeting/interview copilot**. It runs as a private, always-on-top, transparent teleprompter **overlay** on the user's own screen that is **excluded from screen capture and screen-share pickers** using OS content-protection APIs (`setContentProtection(true)` → macOS `NSWindowSharingType=none`, Windows `WDA_EXCLUDEFROMCAPTURE`).
 
 The core loop: capture conversation audio → transcribe with **Deepgram** streaming STT → stream **Claude `claude-haiku-4-5`** cues → render into the overlay, visible only to the user, grounded by **RAG** over the user's own documents. Target latency is **< 1.2s end-to-end p95** (a plan goal — see [caveats](#honest-current-state)).
 
