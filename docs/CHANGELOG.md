@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Dashboard / control window** — a framed main window opens on launch (`?view=dashboard`) with runtime status (STT provider/model, Anthropic-key detection, capture mode, backend) and settings (whisper model), plus a **Start Listening** button that reveals the content-protected overlay. One renderer bundle serves both windows, routed by a `?view=` query; settings persist to a JSON store in the OS user-data dir. Files: `apps/desktop/src/renderer/views/{Dashboard,SessionApp}.tsx`, `main/{window,ipc,settings}.ts`.
 - **Free, offline local speech-to-text (Whisper)** — a new `LocalWhisperSttClient` in `@cue/core` runs whisper.cpp on-device (Metal on Apple Silicon, CPU elsewhere) via the `smart-whisper` native addon — **no API key, no cloud**. It implements the same `SttClient` seam as the Deepgram client (buffers PCM, VAD-segments, emits `partial`/`final`), selected by `sttProvider: 'local-whisper'` / `STT_PROVIDER`. Verified: transcribes the JFK sample correctly and streams (100 ms chunks → interim + final). Loaded via dynamic import + declared an `optionalDependency` so key-less builds never break.
 - **Native system-audio loopback (desktop)** — AssistMe can now hear the *other* participants, not just the local mic, via Electron `getDisplayMedia` + a main-process `audio:'loopback'` handler (ScreenCaptureKit macOS 13+ / WASAPI Windows, no native addon). A **Me / Them / Both** selector mixes mic + system into one 16 kHz stream, gated behind a **one-time in-app consent disclosure**. Implementation: [`apps/desktop/src/main/loopback.ts`](../apps/desktop/src/main/loopback.ts) + renderer `audio/capture-streams.ts`.
 - **Local $0 backend stack** ([`../docker-compose.yml`](../docker-compose.yml)) — Postgres 16 + pgvector (migrations auto-apply on first init), Redis, and all three services (`api`, `ws-gateway`, `ai-orchestrator`) health-gated, so the desktop app runs in `gateway` mode entirely locally for free. **Built + booted for real:** postgres (15 tables + pgvector), redis, api (`/healthz` → `{"status":"ok"}`), ws-gateway all healthy; `ai-orchestrator` fail-loud-requires `ANTHROPIC_API_KEY`/`DEEPGRAM_API_KEY`, so it boots once those are set.
@@ -17,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Capture is always "both" (you + the meeting)** — removed the Me/Them/Both selector; an interview/meeting assistant should always hear the whole conversation, so the overlay mixes mic + system audio into one stream by default (one-time consent disclosure retained).
 - **Speech-to-text now defaults to FREE local Whisper** — `sttProvider` defaults to `local-whisper` when no `DEEPGRAM_API_KEY` is set (across `@cue/core`, `ai-orchestrator`, and the desktop app). Deepgram becomes an opt-in (`STT_PROVIDER=deepgram` + key). The only remaining paid dependency is the Anthropic key (cue generation). The `ai-orchestrator` image gains a C++ toolchain to compile whisper.cpp; `ANTHROPIC_API_KEY` is now its sole required secret at boot (Deepgram no longer required).
 - **Rebrand Cue → AssistMe** (user-facing name only) across web copy/metadata/wordmark, docs, and the desktop display name. `@cue/*` package scope, `Cue*` identifiers, the `cue.v1` protocol, `window.cue`, and `CUE_*` env are unchanged.
 
@@ -26,6 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Local-whisper model download crashed** — `LocalWhisperSttClient` called a non-existent top-level `smart-whisper.download`; the real API is `manager.check/download/resolve`. Fixed + verified via the download path (`tiny.en` by name → downloaded → transcribed). The earlier test used a model *path*, so this branch was never exercised.
 - **Docker images never built** — all three service Dockerfiles called `pnpm deploy --prod --legacy`, but pinned **pnpm 9.12.3 rejects `--legacy`** (`Unknown option`). Removed the flag (the modern `deploy` works without it). Surfaced by actually running `docker compose up --build`.
 - **api / ws-gateway crashed on boot in containers** — `@cue/observability`'s logger unconditionally used the `pino-pretty` transport, a dev-only dependency absent from `--prod` images (`unable to determine transport target for "pino-pretty"`). The logger now uses pretty **only when the transport is resolvable**, else structured JSON. Fixes [`packages/observability/src/logger.ts`](../packages/observability/src/logger.ts).
 

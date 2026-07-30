@@ -74,6 +74,33 @@ export interface AuthState {
   error?: string;
 }
 
+/** Which window a renderer instance is painting (from the `?view=` query). */
+export type WindowView = 'dashboard' | 'overlay';
+
+/** Read-only runtime status shown on the dashboard. */
+export interface AppStatus {
+  /** Speech-to-text backend in effect. */
+  sttProvider: 'deepgram' | 'local-whisper';
+  /** Local-whisper model name (when sttProvider is local-whisper). */
+  whisperModel: string;
+  /** Whether an Anthropic key is configured (cue generation works). */
+  anthropicKeyPresent: boolean;
+  /** Pipeline backend: in-process `local` or `gateway`. */
+  backend: 'local' | 'gateway';
+  /** App version (from package.json). */
+  appVersion: string;
+  /** OS platform: `darwin` | `win32` | `linux`. */
+  platform: string;
+}
+
+/** User-editable settings persisted by the main process. */
+export interface AppSettings {
+  /** Local-whisper ggml model: `tiny.en` | `base.en` | `small.en` | … */
+  whisperModel: string;
+  /** Transcription language (ISO-639-1). */
+  language: string;
+}
+
 /**
  * The API surface exposed to the renderer on `window.cue` via the preload
  * contextBridge. Every method is a thin, typed proxy over Electron IPC.
@@ -87,6 +114,18 @@ export interface IpcApi {
   onState(cb: (s: SessionState) => void): () => void;
   onTranscript(cb: (t: TranscriptEvent) => void): () => void;
   onCue(cb: (e: CueEvent) => void): () => void;
+
+  /* --- Dashboard + window control (Phase 0 UX) --- */
+  /** Runtime status for the dashboard panel. */
+  getStatus(): Promise<AppStatus>;
+  /** Read persisted settings. */
+  getSettings(): Promise<AppSettings>;
+  /** Patch + persist settings; returns the merged result. */
+  setSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
+  /** Dashboard → reveal the content-protected listening overlay. */
+  startListening(): Promise<void>;
+  /** Overlay → hide it and return to the dashboard. */
+  stopListening(): Promise<void>;
 
   /* --- Phase 1 auth (OAuth2 PKCE via the system browser) --- */
   /** Begin (or return the settled result of) the PKCE device flow. */

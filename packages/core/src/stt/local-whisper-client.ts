@@ -45,9 +45,15 @@ interface WhisperInstance {
   transcribe(pcm: Float32Array, params?: Record<string, unknown>): Promise<WhisperTask>;
   free(): Promise<void>;
 }
+/** whisper.cpp model manager (download/resolve/check by name). */
+interface SmartWhisperManager {
+  check(model: string): boolean;
+  download(model: string): Promise<string>;
+  resolve(model: string): string;
+}
 interface SmartWhisperModule {
   Whisper: new (file: string, config?: { gpu?: boolean }) => WhisperInstance;
-  download: (model: string) => Promise<string>;
+  manager: SmartWhisperManager;
 }
 
 /** A model string that points at a file on disk rather than a named model. */
@@ -93,7 +99,16 @@ export class LocalWhisperSttClient {
     this.started = true;
     try {
       const sw = (await import('smart-whisper')) as unknown as SmartWhisperModule;
-      const modelPath = isModelPath(this.model) ? this.model : await sw.download(this.model);
+      let modelPath: string;
+      if (isModelPath(this.model)) {
+        modelPath = this.model;
+      } else {
+        // Named model: download on first use (cached), then resolve to a path.
+        if (!sw.manager.check(this.model)) {
+          await sw.manager.download(this.model);
+        }
+        modelPath = sw.manager.resolve(this.model);
+      }
       this.whisper = new sw.Whisper(modelPath, { gpu: this.gpu });
     } catch (err) {
       this.started = false;
