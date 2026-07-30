@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { AudioChunk, CueEvent, IpcApi, SessionState, TranscriptEvent } from '@cue/types';
+import type {
+  AudioChunk,
+  AuthState,
+  CueEvent,
+  IpcApi,
+  SessionState,
+  TranscriptEvent,
+} from '@cue/types';
 
 /**
  * Cue preload bridge.
@@ -37,6 +44,13 @@ const api: IpcApi = {
   onTranscript: (cb: (t: TranscriptEvent) => void) =>
     subscribe<TranscriptEvent>('cue:transcript', cb),
   onCue: (cb: (e: CueEvent) => void) => subscribe<CueEvent>('cue:cue', cb),
+
+  login: () => ipcRenderer.invoke('cue:auth:login') as Promise<AuthState>,
+  logout: async () => {
+    await ipcRenderer.invoke('cue:auth:logout');
+  },
+  getAuthState: () => ipcRenderer.invoke('cue:auth:state') as Promise<AuthState>,
+  onAuthState: (cb: (s: AuthState) => void) => subscribe<AuthState>('cue:auth-state', cb),
 };
 
 contextBridge.exposeInMainWorld('cue', api);

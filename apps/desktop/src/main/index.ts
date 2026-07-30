@@ -1,18 +1,23 @@
 import { join } from 'node:path';
 import { app, BrowserWindow } from 'electron';
 import type { CuePipeline } from '@cue/core';
+import type { SessionKind } from '@cue/types';
 import { createOverlayWindow } from './window';
-import { createPipeline } from './pipeline-runner';
+import { createPipeline, resolveBackend, type CueBackend } from './pipeline-runner';
+import { AuthManager } from './auth';
 import { registerIpc } from './ipc';
 import { registerGlobalShortcuts, unregisterAll, type ShortcutActions } from './shortcuts';
 
 /**
- * Cue main-process COORDINATOR (Phase 0 foundation).
+ * Cue main-process COORDINATOR (Phase 0 foundation + Phase 1 backend wiring).
  *
  * Responsibilities are deliberately thin — it only orchestrates the modules
  * that the Build phase owns:
- *   createOverlayWindow -> createPipeline -> registerIpc -> registerGlobalShortcuts
- * plus app lifecycle and the single-instance lock.
+ *   createOverlayWindow -> AuthManager -> createPipeline -> registerIpc ->
+ *   registerGlobalShortcuts, plus app lifecycle and the single-instance lock.
+ *
+ * The pipeline backend is chosen from `CUE_BACKEND` (default `local`), so the
+ * Phase 0 in-process path stays the default and is never regressed.
  */
 
 /** Read a required secret from the environment, warning loudly if absent. */
@@ -26,21 +31,57 @@ function readKey(name: 'ANTHROPIC_API_KEY' | 'DEEPGRAM_API_KEY'): string {
   return value;
 }
 
+const VALID_SESSION_KINDS: readonly SessionKind[] = [
+  'interview_prep',
+  'interview_live',
+  'sales',
+  'support',
+  'meeting_notes',
+];
+
+/** Read the configured gateway session kind, defaulting to `interview_live`. */
+function readSessionKind(): SessionKind {
+  const raw = process.env['CUE_SESSION_KIND'];
+  return VALID_SESSION_KINDS.includes(raw as SessionKind)
+    ? (raw as SessionKind)
+    : 'interview_live';
+}
+
 let overlayWindow: BrowserWindow | null = null;
 let pipeline: CuePipeline | null = null;
+let auth: AuthManager | null = null;
 
-function bootstrap(): void {
+async function bootstrap(): Promise<void> {
   // Preload is emitted alongside main by electron-vite (out/preload/index.js).
   const preloadPath = join(__dirname, '../preload/index.js');
 
   overlayWindow = createOverlayWindow(preloadPath);
 
+  const apiBaseUrl = process.env['CUE_API_BASE_URL'] ?? 'http://localhost:3001';
+  auth = new AuthManager({ apiBaseUrl });
+  await auth.init();
+
+  const backend: CueBackend = resolveBackend(process.env);
   pipeline = createPipeline({
-    anthropicApiKey: readKey('ANTHROPIC_API_KEY'),
-    deepgramApiKey: readKey('DEEPGRAM_API_KEY'),
+    backend,
+    local: {
+      anthropicApiKey: readKey('ANTHROPIC_API_KEY'),
+      deepgramApiKey: readKey('DEEPGRAM_API_KEY'),
+    },
+    ...(backend === 'gateway'
+      ? {
+          gateway: {
+            api: auth.getClient(),
+            sessionKind: readSessionKind(),
+            disclosed: process.env['CUE_DISCLOSED'] === 'true',
+            ...(process.env['CUE_WS_URL'] ? { wsUrlOverride: process.env['CUE_WS_URL'] } : {}),
+            ...(process.env['CUE_LANGUAGE'] ? { language: process.env['CUE_LANGUAGE'] } : {}),
+          },
+        }
+      : {}),
   });
 
-  registerIpc(overlayWindow, pipeline);
+  registerIpc(overlayWindow, pipeline, auth);
 
   const actions: ShortcutActions = {
     toggleOverlay: () => {
@@ -77,7 +118,9 @@ if (!gotLock) {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      bootstrap();
+      void bootstrap().catch((err: unknown) => {
+        console.error('[cue] Failed to re-activate:', err);
+      });
     }
   });
 }

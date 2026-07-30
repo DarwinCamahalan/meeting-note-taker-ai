@@ -2,7 +2,9 @@ import { useCallback, useState } from 'react';
 import { useCueStore } from './store';
 import { useCueStream } from './hooks/use-cue-stream';
 import { useAudioCapture } from './hooks/use-audio-capture';
+import { useAuth } from './hooks/use-auth';
 import { Overlay } from './components/Overlay';
+import { AuthChip } from './components/AuthChip';
 import './styles.css';
 
 /**
@@ -20,6 +22,7 @@ export function App(): React.JSX.Element {
   const reset = useCueStore((s) => s.reset);
 
   const audio = useAudioCapture();
+  const auth = useAuth();
   const [active, setActive] = useState(false);
 
   const handleStart = useCallback(async (): Promise<void> => {
@@ -54,6 +57,7 @@ export function App(): React.JSX.Element {
       captureError={audio.error}
       onStart={() => void handleStart()}
       onStop={() => void handleStop()}
+      authSlot={<AuthChip state={auth.state} onLogin={auth.login} onLogout={auth.logout} />}
     />
   );
 }

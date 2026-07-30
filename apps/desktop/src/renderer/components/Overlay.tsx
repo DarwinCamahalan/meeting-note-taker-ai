@@ -14,6 +14,8 @@ interface OverlayProps {
   captureError: string | null;
   onStart(): void;
   onStop(): void;
+  /** Optional header slot (Phase 1 auth affordance); omitted in the local path. */
+  authSlot?: React.ReactNode;
 }
 
 /**
@@ -22,19 +24,22 @@ interface OverlayProps {
  * interactive controls opt out via the `no-drag` class in styles.css.
  */
 export function Overlay(props: OverlayProps): React.JSX.Element {
-  const { state, cue, partial, active, capturing, captureError, onStart, onStop } = props;
+  const { state, cue, partial, active, capturing, captureError, onStart, onStop, authSlot } = props;
 
   return (
     <main className="overlay" data-state={state}>
       <header className="overlay__bar">
         <StatusIndicator state={state} capturing={capturing} />
-        <button
-          type="button"
-          className={`overlay__toggle no-drag${active ? ' overlay__toggle--stop' : ''}`}
-          onClick={active ? onStop : onStart}
-        >
-          {active ? 'Stop' : 'Start'}
-        </button>
+        <div className="overlay__actions">
+          {authSlot}
+          <button
+            type="button"
+            className={`overlay__toggle no-drag${active ? ' overlay__toggle--stop' : ''}`}
+            onClick={active ? onStop : onStart}
+          >
+            {active ? 'Stop' : 'Start'}
+          </button>
+        </div>
       </header>
 
       <CueCard cue={cue} thinking={state === 'thinking'} />
