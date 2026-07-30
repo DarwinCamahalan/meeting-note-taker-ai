@@ -1,5 +1,6 @@
 import type { AudioChunk, CueEvent, SessionState, TranscriptEvent } from '@cue/types';
 import type { RagContextProvider } from './rag/context-provider.js';
+import type { LocalWhisperOptions } from './stt/local-whisper-client.js';
 
 /**
  * The runnable AI pipeline consumed by the Electron main process.
@@ -51,7 +52,19 @@ export interface ReliabilityConfig {
 /** Credentials required to construct the pipeline. Read from env in main. */
 export interface OrchestratorConfig {
   anthropicApiKey: string;
-  deepgramApiKey: string;
+  /**
+   * Deepgram API key — only required when {@link sttProvider} resolves to
+   * `deepgram`. Omit it to run the free, offline `local-whisper` provider.
+   */
+  deepgramApiKey?: string;
+  /**
+   * Speech-to-text backend. When omitted it defaults to `deepgram` if a
+   * `deepgramApiKey` is present, otherwise `local-whisper` (free, offline,
+   * no key — runs whisper.cpp on-device).
+   */
+  sttProvider?: 'deepgram' | 'local-whisper';
+  /** Tuning for the `local-whisper` provider (model, gpu, VAD cadence). */
+  whisper?: LocalWhisperOptions;
   /** Optional RAG grounding; omit for the local/no-RAG path. */
   rag?: RagConfig;
   /** Optional reliability tuning; omit for the resilient defaults. */

@@ -28,8 +28,10 @@ All services read the **repo-root `.env`** (copy of [`../.env.example`](../.env.
 
 | Var | Consumer | If unset |
 |-----|----------|----------|
-| `ANTHROPIC_API_KEY` | Claude `claude-haiku-4-5` streaming cues | pipeline can't produce cues |
-| `DEEPGRAM_API_KEY` | Deepgram live STT | pipeline can't transcribe |
+| `ANTHROPIC_API_KEY` | Claude `claude-haiku-4-5` streaming cues | pipeline can't produce cues (**only required key**) |
+| `STT_PROVIDER` | `local-whisper` (free, offline, on-device — default) or `deepgram` (paid cloud) | `local-whisper` when no `DEEPGRAM_API_KEY`, else `deepgram` |
+| `WHISPER_MODEL` | local-whisper ggml model: `tiny.en`/`base.en`/`small.en`/… or a `.bin` path | `base.en` (downloaded on first use) |
+| `DEEPGRAM_API_KEY` | Deepgram live STT — **only when `STT_PROVIDER=deepgram`** | ignored; free local Whisper is used instead |
 
 ### Phase 1 — backend services
 
@@ -112,9 +114,19 @@ All services read the **repo-root `.env`** (copy of [`../.env.example`](../.env.
 ### Phase 0 — desktop overlay only (no backend)
 
 ```bash
-# set ANTHROPIC_API_KEY + DEEPGRAM_API_KEY in .env
+# set ANTHROPIC_API_KEY in .env (STT is free local Whisper by default — no
+# DEEPGRAM key needed). First run downloads the ggml model (~150 MB, cached).
 pnpm --filter @cue/desktop dev        # electron-vite dev server
 ```
+
+> **Native-module note (local-whisper in Electron):** `smart-whisper` is a native
+> addon; when `@cue/core` runs inside Electron's main process its ABI differs
+> from system Node, so it must be rebuilt for Electron
+> (`pnpm --filter @cue/desktop exec electron-rebuild -f -w smart-whisper`) and
+> unpacked from the asar when packaging. Until that's wired, use **gateway mode**
+> (`CUE_BACKEND=gateway`), where whisper runs in the plain-Node `ai-orchestrator`
+> — the fully-verified free-STT path. The client fails loud (overlay error) if the
+> addon can't load, rather than silently producing nothing.
 
 This is the whole product loop: audio → Deepgram → Claude → overlay. Pick the audio source in the overlay's **Me / Them / Both** selector:
 

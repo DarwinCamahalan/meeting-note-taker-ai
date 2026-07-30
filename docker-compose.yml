@@ -54,14 +54,22 @@ services:
       context: .
       dockerfile: services/ai-orchestrator/Dockerfile
     restart: unless-stopped
-    # ANTHROPIC_API_KEY, DEEPGRAM_API_KEY, VOYAGE_API_KEY come from .env.
+    # ANTHROPIC_API_KEY (required) + optional VOYAGE_API_KEY come from .env.
+    # STT is FREE local whisper.cpp by default — no DEEPGRAM_API_KEY needed.
     env_file:
       - path: .env
         required: false
     environment:
       METRICS_PORT: "9464"
+      # Free, offline speech-to-text (on-device whisper.cpp). Set
+      # STT_PROVIDER=deepgram + DEEPGRAM_API_KEY to use the paid cloud instead.
+      STT_PROVIDER: "local-whisper"
+      WHISPER_MODEL: "base.en"
       # No OTel collector in the $0 stack — keep tracing off to avoid noise.
       OTEL_SDK_DISABLED: "true"
+    volumes:
+      # Persist the downloaded ggml model across restarts (first boot fetches it).
+      - whisper-models:/app/node_modules/smart-whisper/models
     ports:
       - "50051:50051"
 
@@ -116,3 +124,4 @@ services:
 
 volumes:
   pgdata:
+  whisper-models:

@@ -69,11 +69,25 @@ async function bootstrap(): Promise<void> {
   await auth.init();
 
   const backend: CueBackend = resolveBackend(process.env);
+  // STT backend: default to free, offline local-whisper unless a Deepgram key
+  // is present or STT_PROVIDER explicitly asks for deepgram.
+  const sttProvider: 'deepgram' | 'local-whisper' =
+    process.env['STT_PROVIDER'] === 'deepgram' || process.env['STT_PROVIDER'] === 'local-whisper'
+      ? process.env['STT_PROVIDER']
+      : process.env['DEEPGRAM_API_KEY']
+        ? 'deepgram'
+        : 'local-whisper';
   pipeline = createPipeline({
     backend,
     local: {
       anthropicApiKey: readKey('ANTHROPIC_API_KEY'),
-      deepgramApiKey: readKey('DEEPGRAM_API_KEY'),
+      sttProvider,
+      ...(process.env['DEEPGRAM_API_KEY']
+        ? { deepgramApiKey: process.env['DEEPGRAM_API_KEY'] }
+        : {}),
+      ...(sttProvider === 'local-whisper'
+        ? { whisper: process.env['WHISPER_MODEL'] ? { model: process.env['WHISPER_MODEL'] } : {} }
+        : {}),
     },
     ...(backend === 'gateway'
       ? {

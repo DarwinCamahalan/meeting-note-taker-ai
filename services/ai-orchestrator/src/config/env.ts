@@ -15,8 +15,19 @@ export interface OrchestratorEnv {
   readonly grpcAddr: string;
   /** Anthropic API key handed to `@cue/core` (Claude cue streaming). */
   readonly anthropicApiKey: string;
-  /** Deepgram API key handed to `@cue/core` (live STT). */
-  readonly deepgramApiKey: string;
+  /**
+   * Deepgram API key handed to `@cue/core` — only required when
+   * {@link sttProvider} is `deepgram`. Undefined for the free local path.
+   */
+  readonly deepgramApiKey: string | undefined;
+  /**
+   * Speech-to-text backend: `deepgram` (cloud, paid) or `local-whisper` (free,
+   * offline, on-device whisper.cpp — no key). Defaults to `deepgram` when a
+   * DEEPGRAM_API_KEY is set, else `local-whisper`.
+   */
+  readonly sttProvider: 'deepgram' | 'local-whisper';
+  /** ggml model for local-whisper (name or path). Default `base.en`. */
+  readonly whisperModel: string;
   /**
    * Voyage AI key for `voyage-3.5` query embeddings. Optional: when unset (or
    * DATABASE_URL is unset) RAG grounding is disabled and the pipeline runs the
@@ -57,7 +68,9 @@ export function loadOrchestratorEnv(env: NodeJS.ProcessEnv = process.env): Orche
   return {
     grpcAddr: optional(env, 'ORCHESTRATOR_GRPC_ADDR') ?? DEFAULT_GRPC_ADDR,
     anthropicApiKey: required(env, 'ANTHROPIC_API_KEY'),
-    deepgramApiKey: required(env, 'DEEPGRAM_API_KEY'),
+    deepgramApiKey: optional(env, 'DEEPGRAM_API_KEY'),
+    sttProvider: parseSttProvider(optional(env, 'STT_PROVIDER'), optional(env, 'DEEPGRAM_API_KEY')),
+    whisperModel: optional(env, 'WHISPER_MODEL') ?? 'base.en',
     voyageApiKey: optional(env, 'VOYAGE_API_KEY'),
     databaseUrl: optional(env, 'DATABASE_URL'),
     metricsPort: parsePort(optional(env, 'METRICS_PORT'), DEFAULT_METRICS_PORT),
@@ -65,6 +78,20 @@ export function loadOrchestratorEnv(env: NodeJS.ProcessEnv = process.env): Orche
     claudeRpmLimit: parseCount(optional(env, 'CLAUDE_RPM_LIMIT'), 0),
     sttConcurrency: parseCount(optional(env, 'STT_CONCURRENCY'), 0),
   };
+}
+
+/** Validate STT_PROVIDER; default to deepgram only when a key is present. */
+function parseSttProvider(
+  raw: string | undefined,
+  deepgramKey: string | undefined,
+): 'deepgram' | 'local-whisper' {
+  if (raw === 'deepgram' || raw === 'local-whisper') return raw;
+  if (raw !== undefined) {
+    throw new Error(
+      `[ai-orchestrator] invalid STT_PROVIDER '${raw}' (expected 'deepgram' | 'local-whisper')`,
+    );
+  }
+  return deepgramKey ? 'deepgram' : 'local-whisper';
 }
 
 function parsePort(raw: string | undefined, fallback: number): number {

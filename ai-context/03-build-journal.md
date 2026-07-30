@@ -168,6 +168,15 @@ Unsigned / arm64 / single-arch is the **local dev/QA** build. The **signed + not
 
 Runtime code — merged to `dev`, **held from `main`** pending a local test run (see [the promotion policy](#the-one-thing-to-know-first)).
 
+## Milestone: free, offline speech-to-text (Whisper) — Deepgram made optional
+
+**2026-07-30.** At the user's request ("implement the best, free, no Deepgram or any paid service except the Anthropic key"), STT moved from cloud Deepgram to **on-device whisper.cpp**.
+
+- **Not from scratch** — a speech model is trained, not hand-written. We run the open Whisper model locally via the `smart-whisper` native addon (Metal on Apple Silicon, CPU elsewhere). Proven end-to-end before wiring: transcribed the JFK sample correctly, and streamed (11 s fed as 100 ms chunks → `partial` + `final`).
+- **`LocalWhisperSttClient`** ([`packages/core/src/stt/local-whisper-client.ts`](../packages/core/src/stt/local-whisper-client.ts)) — same structural `SttClient` as Deepgram. Buffers 16 kHz PCM, energy-VAD segments, re-transcribes on an interval (interim `partial`) and finalizes on trailing silence / max length (`final`). `smart-whisper` is a **dynamic import** + an **optionalDependency**, so key-less/toolchain-less builds never break.
+- **Wiring** — `sttProvider` on `OrchestratorConfig` (defaults to `local-whisper` when no Deepgram key); resolved in the orchestrator factory, `ai-orchestrator` env (`STT_PROVIDER`/`WHISPER_MODEL`), and the desktop main. Deepgram is now opt-in; **Anthropic is the only required key**.
+- **Packaging** — the `ai-orchestrator` image gained a C++ toolchain (build stage) + `libgomp1` (runtime) to compile whisper.cpp; the model persists in a `whisper-models` volume. Desktop **local mode** still needs an Electron-ABI rebuild of the addon (see [`05-setup-and-run.md`](05-setup-and-run.md)); the verified free path is gateway mode (whisper in the plain-Node orchestrator).
+
 ## Cross-cutting: what never got built (and why)
 
 - **Legal / consent / recording-disclosure.** Explicitly **descoped** in PR #2 (`cc85267` removed `90-legal-compliance.md` and the legal audit). The residual recording-consent + GDPR risk is real and unresolved — preserved in git history, and the reason the loopback capture stub is deliberately gated. Do **not** re-introduce legal docs; document it as descoped. See [`07-todos-and-gaps.md`](07-todos-and-gaps.md#descoped-legal--consent) and [`04-plan-mapping.md`](04-plan-mapping.md#the-legal-descope).
