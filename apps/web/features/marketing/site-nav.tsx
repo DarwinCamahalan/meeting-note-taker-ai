@@ -21,7 +21,7 @@ export function SiteNav() {
         </div>
 
         <Link href="/download" className="btn-primary !px-4 !py-2">
-          Get Cue
+          Get AssistMe
         </Link>
       </nav>
     </header>

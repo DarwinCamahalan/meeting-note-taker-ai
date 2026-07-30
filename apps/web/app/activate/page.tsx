@@ -5,7 +5,7 @@ import { Wordmark } from '@/features/marketing/wordmark';
 
 export const metadata: Metadata = {
   title: 'Activate a device',
-  description: 'Approve a Cue desktop sign-in.',
+  description: 'Approve an AssistMe desktop sign-in.',
   // Auth surface — keep it out of search indexes.
   robots: { index: false, follow: false },
 };

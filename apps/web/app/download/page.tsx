@@ -8,7 +8,7 @@ import { buildMetadata } from '@/lib/seo/metadata';
 export const metadata: Metadata = buildMetadata({
   title: 'Download',
   description:
-    'Download Cue for macOS, Windows, or Linux. We detect your platform and hand you the right signed installer.',
+    'Download AssistMe for macOS, Windows, or Linux. We detect your platform and hand you the right signed installer.',
   path: '/download',
 });
 
@@ -20,10 +20,10 @@ export default function DownloadPage() {
       <main className="flex-1">
         <section className="mx-auto max-w-4xl px-6 py-20 text-center">
           <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
-            Download Cue
+            Download AssistMe
           </h1>
           <p className="mx-auto mt-4 max-w-xl text-lg text-white/60">
-            One click for your platform. Cue installs as a content-protected
+            One click for your platform. AssistMe installs as a content-protected
             overlay — invisible to screen shares and recordings.
           </p>
 

@@ -2,7 +2,7 @@
 
 > Status: Draft · Owner: Principal Architect (Identity & Security) · Last updated: 2026-07-29 · Related: [Decision record](04-decision-record.md) · [Remediation plan](05-remediation-plan.md) · [System architecture](02-system-architecture.md) · [Desktop app](10-desktop-app.md) · [Backend services](20-backend-services.md) · [Data model](30-data-model.md) · [Subscriptions & entitlements](50-subscriptions-entitlements.md) · [DevOps & infrastructure](60-devops-infrastructure.md) · [Observability](61-observability.md)
 
-This document is the authoritative reference for **who a caller is** (authentication) and **what they may do** (authorization) across every surface of **Cue** (provisional brand): the Electron desktop app, the Next.js web app, and the backend services (`api`, `ws-gateway`, `ai-orchestrator`, `entitlements`). It owns the token model, the desktop OAuth/PKCE flow, device binding, the RBAC org/team model, session lifecycle, step-up 2FA, and auth-endpoint hardening.
+This document is the authoritative reference for **who a caller is** (authentication) and **what they may do** (authorization) across every surface of **AssistMe** (provisional brand; formerly Cue): the Electron desktop app, the Next.js web app, and the backend services (`api`, `ws-gateway`, `ai-orchestrator`, `entitlements`). It owns the token model, the desktop OAuth/PKCE flow, device binding, the RBAC org/team model, session lifecycle, step-up 2FA, and auth-endpoint hardening.
 
 It does **not** own: the jurisdictional recording-consent law analysis (owned by the legal/compliance doc — linked below as `legal/compliance`), the entitlement/feature-gate logic ([Entitlements](50-subscriptions-entitlements.md) — auth only supplies the identity context it keys off), or the Postgres DDL for the full schema ([Data model](30-data-model.md) — this doc shows only the identity tables and links to the canonical source).
 
@@ -10,7 +10,7 @@ It does **not** own: the jurisdictional recording-consent law analysis (owned by
 
 ## 1. Identity providers: who does what
 
-Cue uses a **split-provider** identity strategy. Consumer self-serve auth and enterprise SSO have fundamentally different lifecycles, and forcing one provider to do both leads to a compromised implementation of each.
+AssistMe uses a **split-provider** identity strategy. Consumer self-serve auth and enterprise SSO have fundamentally different lifecycles, and forcing one provider to do both leads to a compromised implementation of each.
 
 | Concern | Provider | Rationale |
 |---|---|---|
@@ -30,8 +30,8 @@ Cue uses a **split-provider** identity strategy. Consumer self-serve auth and en
 Neither Clerk's nor WorkOS's session token is ever trusted directly by `ws-gateway` or `ai-orchestrator`. Instead:
 
 1. The provider authenticates the human and returns a provider assertion (Clerk session JWT / WorkOS profile).
-2. `api` verifies that assertion against the provider's JWKS, then **upserts** a canonical `users` row (keyed by provider + provider subject) and mints **Cue's own** access + refresh tokens (§2).
-3. All downstream services validate **only** Cue tokens against Cue's JWKS.
+2. `api` verifies that assertion against the provider's JWKS, then **upserts** a canonical `users` row (keyed by provider + provider subject) and mints **AssistMe's own** access + refresh tokens (§2).
+3. All downstream services validate **only** AssistMe tokens against AssistMe's JWKS.
 
 This keeps provider lock-in at the edge and gives us one place to enforce device binding, entitlement claims, and revocation.
 
@@ -41,18 +41,18 @@ flowchart LR
     C[Clerk<br/>consumer]
     W[WorkOS<br/>enterprise SSO/SCIM]
   end
-  subgraph Cue
-    B["api: identity-broker<br/>verify assertion -> upsert user -> mint Cue tokens"]
-    J[(Cue JWKS)]
+  subgraph AssistMe
+    B["api: identity-broker<br/>verify assertion -> upsert user -> mint AssistMe tokens"]
+    J[(AssistMe JWKS)]
     DB[(Postgres: users, orgs,<br/>memberships, devices, sessions)]
   end
   C -->|session JWT| B
   W -->|SAML/OIDC profile + SCIM| B
   B --> DB
   B --> J
-  B -->|Cue access + refresh| Clients[Desktop / Web]
-  Clients -->|Cue access JWT| WS[ws-gateway]
-  Clients -->|Cue access JWT| AO[ai-orchestrator]
+  B -->|AssistMe access + refresh| Clients[Desktop / Web]
+  Clients -->|AssistMe access JWT| WS[ws-gateway]
+  Clients -->|AssistMe access JWT| AO[ai-orchestrator]
   WS -->|verify| J
   AO -->|verify| J
 ```
@@ -61,7 +61,7 @@ flowchart LR
 
 ## 2. Token model
 
-Cue issues its own tokens. Two token types, asymmetric signing, short access lifetime, rotating refresh.
+AssistMe issues its own tokens. Two token types, asymmetric signing, short access lifetime, rotating refresh.
 
 | Token | Format | Lifetime | Signing | Storage (desktop) | Storage (web) |
 |---|---|---|---|---|---|
@@ -73,7 +73,7 @@ Cue issues its own tokens. Two token types, asymmetric signing, short access lif
 ```jsonc
 {
   "iss": "https://api.cue.app",
-  "sub": "usr_2a9…",              // Cue user id
+  "sub": "usr_2a9…",              // AssistMe user id
   "sid": "ses_7f3…",             // session id (revocable, see §5)
   "did": "dev_c41…",             // bound device id (see §3)
   "org": "org_18b…",             // active org context (nullable for personal)
@@ -175,7 +175,7 @@ sequenceDiagram
     API->>API: verify S256(code_verifier)==code_challenge<br/>bind/register device (§3.3)
     API-->>D: {access_jwt (10m), refresh_token, session_id, device_id}
     D->>KC: safeStorage.encryptString(refresh_token) -> keychain
-    LB-->>BR: 200 "You can return to Cue" (auto-close tab)
+    LB-->>BR: 200 "You can return to AssistMe" (auto-close tab)
     D->>D: keep access_jwt in memory; schedule silent refresh
 ```
 
@@ -310,7 +310,7 @@ export class RolesGuard implements CanActivate {
 }
 ```
 
-WorkOS SCIM is the source of truth for enterprise org membership: SCIM `POST/PATCH/DELETE` on users/groups map to `memberships` and `team_members` rows so deprovisioning in the customer's IdP revokes Cue access automatically.
+WorkOS SCIM is the source of truth for enterprise org membership: SCIM `POST/PATCH/DELETE` on users/groups map to `memberships` and `team_members` rows so deprovisioning in the customer's IdP revokes AssistMe access automatically.
 
 ---
 
@@ -354,7 +354,7 @@ sequenceDiagram
 Every **live copilot session** begins with an explicit consent gate before any audio is captured or streamed. `api` records a `session_consent` row: `{ session_id, user_id, consent_mode, jurisdiction_hint, disclosed_flag, ts, policy_version }`.
 
 - **Modes:** `personal-prep` (interview prep / practice — no other party), `disclosed` (the user has informed other participants that AI note-taking is active), and `notes-only`.
-- Recording-consent law varies (two-party-consent US states, GDPR lawful basis, etc.). Cue surfaces a jurisdiction-aware prompt and a **"disclosed mode"** banner/announcement helper. **The authoritative acceptable-use policy, the jurisdictional matrix, and the exact consent copy are owned by the `legal/compliance` doc** — auth only persists the immutable, audit-logged consent record and blocks capture until it exists.
+- Recording-consent law varies (two-party-consent US states, GDPR lawful basis, etc.). AssistMe surfaces a jurisdiction-aware prompt and a **"disclosed mode"** banner/announcement helper. **The authoritative acceptable-use policy, the jurisdictional matrix, and the exact consent copy are owned by the `legal/compliance` doc** — auth only persists the immutable, audit-logged consent record and blocks capture until it exists.
 
 ---
 

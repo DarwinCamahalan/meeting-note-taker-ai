@@ -11,7 +11,7 @@ import type { AdminBootstrap } from '@/features/admin/types';
 
 export const metadata: Metadata = {
   title: 'Admin console',
-  description: 'Manage your Cue organization: members, SSO, settings, and billing.',
+  description: 'Manage your AssistMe organization: members, SSO, settings, and billing.',
   robots: { index: false, follow: false },
 };
 

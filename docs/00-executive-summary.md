@@ -1,14 +1,14 @@
-# Cue — Executive Summary
+# AssistMe — Executive Summary
 
 > Status: Draft · Owner: Founder / Principal Architect · Last updated: 2026-07-29 · Related: [Product Vision](01-product-vision.md) · [System Architecture](02-system-architecture.md) · [AI Pipeline](21-ai-pipeline.md) · [Unit Economics](71-unit-economics.md) · [Subscriptions & Entitlements](50-subscriptions-entitlements.md) · [Roadmap](80-roadmap.md)
 
-> **Cue** is a provisional working title. All brand references in this plan are placeholders.
+> **AssistMe** (formerly Cue) is a provisional working title. All brand references in this plan are placeholders.
 
 ---
 
 ## 1. The one-paragraph pitch
 
-**Cue is a cross-platform (macOS + Windows) real-time AI meeting and interview copilot.** It runs as a private, always-on-top, transparent teleprompter overlay on the user's own screen. Cue captures both sides of a live conversation (system/loopback audio + the user's microphone), transcribes it in under 300ms, and streams AI-generated cues, suggested talking points, and live notes into the overlay — visible **only to the user**. The overlay is excluded from screen capture and screen sharing (Zoom, Google Meet, Microsoft Teams, Webex) using the same OS-level content-protection APIs that password managers and banking apps rely on, so the user gets private, in-the-moment support without disrupting the call. Cue is built for interview **preparation and confidence**, sales and support copiloting, meeting note-taking, and accessibility (users with anxiety, ADHD, hearing difficulty, or non-native speakers).
+**AssistMe is a cross-platform (macOS + Windows) real-time AI meeting and interview copilot.** It runs as a private, always-on-top, transparent teleprompter overlay on the user's own screen. AssistMe captures both sides of a live conversation (system/loopback audio + the user's microphone), transcribes it in under 300ms, and streams AI-generated cues, suggested talking points, and live notes into the overlay — visible **only to the user**. The overlay is excluded from screen capture and screen sharing (Zoom, Google Meet, Microsoft Teams, Webex) using the same OS-level content-protection APIs that password managers and banking apps rely on, so the user gets private, in-the-moment support without disrupting the call. AssistMe is built for interview **preparation and confidence**, sales and support copiloting, meeting note-taking, and accessibility (users with anxiety, ADHD, hearing difficulty, or non-native speakers).
 
 ---
 
@@ -24,13 +24,13 @@ The three structural gaps:
 | **Privacy** | Copilot windows appear on shared screens and in screen-share pickers | User can't use assistance on a shared call without exposing it |
 | **Personalization** | Generic LLM answers with no grounding | Cues ignore the user's resume, deal context, or product docs |
 
-Cue closes all three: **< 1.2s end-to-end p95**, hardware-level capture exclusion, and **RAG-grounded** cues built from the user's own documents.
+AssistMe closes all three: **< 1.2s end-to-end p95**, hardware-level capture exclusion, and **RAG-grounded** cues built from the user's own documents.
 
 ---
 
 ## 3. Target market & TAM sketch
 
-Cue sits at the intersection of two fast-growing categories: **AI meeting assistants** and **interview/career preparation**.
+AssistMe sits at the intersection of two fast-growing categories: **AI meeting assistants** and **interview/career preparation**.
 
 ```mermaid
 flowchart LR
@@ -54,14 +54,14 @@ flowchart LR
 
 | Player | Category | Real-time cues? | Capture-excluded overlay? | RAG on user docs? | Native desktop |
 |--------|----------|:---------------:|:-------------------------:|:-----------------:|:--------------:|
-| **Cue** | Live copilot | **Yes (<1.2s p95)** | **Yes (OS-level)** | **Yes** | **Electron, mac+win** |
+| **AssistMe** | Live copilot | **Yes (<1.2s p95)** | **Yes (OS-level)** | **Yes** | **Electron, mac+win** |
 | Otter.ai / Fireflies / Fathom | Post-call notes | No | N/A | Partial | Web/bots |
 | Gong / Chorus | Revenue intelligence | No (post-call coaching) | N/A | Deal data | Web |
 | Read AI / tl;dv | Meeting summaries | Limited | No | No | Web/bots |
 | "Interview cheat" browser tools | Interview assist | Some | No (visible on share) | Weak | Browser tabs |
 | Generic LLM chat (Claude/ChatGPT app) | General | Manual copy-paste | No | Manual | Desktop apps |
 
-**Where competitors are weak and Cue wins:** true sub-second real-time guidance, a genuinely private overlay that is invisible on shared screens *and* absent from screen-share source pickers, and cues grounded in the user's own resume / deal / knowledge base. Post-call note-takers are complements, not direct substitutes — Cue also produces summaries, but its differentiated value is *during* the call.
+**Where competitors are weak and AssistMe wins:** true sub-second real-time guidance, a genuinely private overlay that is invisible on shared screens *and* absent from screen-share source pickers, and cues grounded in the user's own resume / deal / knowledge base. Post-call note-takers are complements, not direct substitutes — AssistMe also produces summaries, but its differentiated value is *during* the call.
 
 Detailed feature-by-feature differentiation lives in [Product Vision §5](01-product-vision.md).
 
@@ -198,7 +198,7 @@ Use of funds: (1) hit and hold the latency + capture-exclusion targets across bo
 
 ## Open questions & risks
 
-- **Brand.** "Cue" is provisional; trademark clearance and domain acquisition pending.
+- **Brand.** "AssistMe" is provisional; trademark clearance and domain acquisition pending.
 - **TAM precision.** Numbers here are order-of-magnitude framing, not a validated bottom-up model — the defensible version lives in [Unit Economics](71-unit-economics.md) and must be reconciled before any external fundraising deck cites them.
 - **Regulatory trajectory.** Recording-consent and AI-disclosure law is evolving; the disclosed-mode default and jurisdiction handling may need to tighten. Owned by the legal/compliance audit.
 - **Positioning tension.** The product must be marketed around preparation, confidence, and accessibility — *not* deception. This constrains some growth tactics; see [Product Vision](01-product-vision.md).

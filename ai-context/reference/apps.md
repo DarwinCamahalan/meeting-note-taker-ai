@@ -63,7 +63,7 @@ Key `webPreferences`: `sandbox: true`, `contextIsolation: true`, `nodeIntegratio
 
 Plus `setAlwaysOnTop(true, 'screen-saver')`, `setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })`, and `app.dock?.hide()` on macOS.
 
-> **Honesty pass — what content protection is NOT.** The code comment is explicit: this excludes the **window** from capture/recording/share only. It does **not** hide the process from the OS, Activity Monitor / Task Manager, or any EDR / monitoring agent — Cue remains fully visible to the operating system.
+> **Honesty pass — what content protection is NOT.** The code comment is explicit: this excludes the **window** from capture/recording/share only. It does **not** hide the process from the OS, Activity Monitor / Task Manager, or any EDR / monitoring agent — AssistMe remains fully visible to the operating system.
 
 The renderer loads from `ELECTRON_RENDERER_URL` (dev server) or `loadFile(../renderer/index.html)` (production). Shown via `showInactive()` on `ready-to-show` so it never steals focus.
 
@@ -99,7 +99,7 @@ Push subscribers return an unsubscribe fn (preload `subscribe<T>` wraps `ipcRend
 | `CommandOrControl+Shift+E` | end session (`endSession` → `pipeline.stop()`) |
 | `Escape` | end session |
 
-> **Honesty pass — TODO.** Registering `Escape` as a **global** shortcut swallows Escape in every app while Cue runs. The code carries a `TODO(phase-1)` to move it to a window-local binding. Still global as built.
+> **Honesty pass — TODO.** Registering `Escape` as a **global** shortcut swallows Escape in every app while AssistMe runs. The code carries a `TODO(phase-1)` to move it to a window-local binding. Still global as built.
 
 ### 1.5 Microphone capture — `src/renderer/hooks/use-audio-capture.ts`
 
@@ -264,7 +264,7 @@ This keeps the ~600KB `three` bundle in a separate async chunk, out of the RSC/S
 
 Tiers defined in `features/pricing/plans.ts`; rendered by `pricing-tiers.tsx` / `tier-card.tsx`. The CTA (`checkout-button.tsx`) uses `hooks/use-checkout.ts`:
 - Builds a `CueApiClient` against `apiBaseUrl()`, calls `client.billing.createCheckout({ tier, interval, successUrl, cancelUrl })`, then `window.location.assign(url)` to Stripe's hosted page.
-- The marketing site is unauthenticated, so a `401/403` is surfaced gracefully as "Please sign in from the Cue app to upgrade" rather than a hard error. `successUrl` → `/download?checkout=success`, `cancelUrl` → `/pricing?checkout=cancelled`.
+- The marketing site is unauthenticated, so a `401/403` is surfaced gracefully as "Please sign in from the AssistMe app to upgrade" rather than a hard error. `successUrl` → `/download?checkout=success`, `cancelUrl` → `/pricing?checkout=cancelled`.
 
 Only self-serve tiers (Pro/Team) can start Checkout; Free/Enterprise cannot (`CheckoutTier` = `CheckoutSessionRequest['tier']`). Billing server side is in `services/api` (see [`services.md`](services.md)).
 

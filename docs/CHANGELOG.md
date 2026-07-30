@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the **Cue** (provisional brand) architecture & business plan are documented in this file.
+All notable changes to the **AssistMe** (provisional brand; formerly Cue) architecture & business plan are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions here track the **planning/documentation set**, not the shipped software; product releases will be tracked separately once the [roadmap](80-roadmap.md) Phase 1 build begins.
 
@@ -64,7 +64,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- **Initial architecture & business plan documentation set** for Cue — a cross-platform (macOS + Windows) real-time AI meeting & interview copilot with a content-protected, screen-share-invisible teleprompter overlay. The set establishes the canonical product definition, tech stack, non-functional targets, and business model. Documents authored in this release:
+- **Initial architecture & business plan documentation set** for AssistMe — a cross-platform (macOS + Windows) real-time AI meeting & interview copilot with a content-protected, screen-share-invisible teleprompter overlay. The set establishes the canonical product definition, tech stack, non-functional targets, and business model. Documents authored in this release:
   - [00-executive-summary.md](00-executive-summary.md) — vision, market, and business model at a glance.
   - [01-product-vision.md](01-product-vision.md) — personas, use cases, scope, differentiation, and responsible-use summary.
   - [02-system-architecture.md](02-system-architecture.md) — high-level architecture, C4-ish views, data flow, sequence diagrams, and ADRs.

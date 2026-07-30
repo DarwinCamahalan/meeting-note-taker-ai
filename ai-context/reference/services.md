@@ -84,7 +84,7 @@ All paths are `v1`-prefixed. **Auth column:** *public* = no guard; *JWT* = `JwtA
 | `GET /v1/orgs/:orgId/documents` | `TeamKbController` | JWT (any member) | List shared team KB (`visibility='org'`) |
 | `DELETE /v1/orgs/:orgId/documents/:documentId` | `TeamKbController` | JWT (owner/admin) | Remove a team-KB doc (`204`) |
 | `GET /v1/sso/authorize` | `SsoController` | public | `org`/`domain` → org's WorkOS connection → authorization URL |
-| `GET /v1/sso/callback` | `SsoController` | WorkOS redirect | Exchange `code` → profile → upsert `users`+`orgMembers` → mint Cue JWT |
+| `GET /v1/sso/callback` | `SsoController` | WorkOS redirect | Exchange `code` → profile → upsert `users`+`orgMembers` → mint AssistMe JWT |
 | `GET /v1/orgs/:orgId/sso/connections` | `SsoConnectionsController` | role owner/admin | List SSO connections |
 | `POST /v1/orgs/:orgId/sso/connections` | `SsoConnectionsController` | role owner/admin | Create SSO connection (`201`) |
 | `DELETE /v1/orgs/:orgId/sso/connections/:connectionId` | `SsoConnectionsController` | role owner/admin | Delete SSO connection (`204`) |

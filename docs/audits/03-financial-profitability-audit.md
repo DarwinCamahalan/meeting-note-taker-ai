@@ -1,4 +1,4 @@
-# Financial / Unit-Economics & Profitability Audit — Cue
+# Financial / Unit-Economics & Profitability Audit — AssistMe
 
 > Status: Draft (audit) · Owner: Due-Diligence Reviewer (Finance / Unit Economics) · Last updated: 2026-07-29 · Scope: [71-unit-economics.md](../71-unit-economics.md), [50-subscriptions-entitlements.md](../50-subscriptions-entitlements.md), [51-payments-stripe.md](../51-payments-stripe.md), [21-ai-pipeline.md](../21-ai-pipeline.md), [00-executive-summary.md](../00-executive-summary.md)
 

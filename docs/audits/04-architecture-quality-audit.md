@@ -1,4 +1,4 @@
-# Architecture & Code Quality Audit — Cue
+# Architecture & Code Quality Audit — AssistMe
 
 > Status: Draft · Owner: Due-Diligence Reviewer (Architecture & Code Quality) · Last updated: 2026-07-29 · Scope: [02-system-architecture](../02-system-architecture.md) · [03-repository-structure](../03-repository-structure.md) · [10-desktop-app](../10-desktop-app.md) · [11-web-landing](../11-web-landing.md) · [12-design-system](../12-design-system.md) · [13-engineering-standards](../13-engineering-standards.md) · [20-backend-services](../20-backend-services.md)
 

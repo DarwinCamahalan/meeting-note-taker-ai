@@ -55,7 +55,7 @@ export function SsoSigninForm(): React.JSX.Element {
       </form>
 
       <p className="mt-6 text-xs text-white/35">
-        Personal account? Sign in from the Cue desktop app instead.
+        Personal account? Sign in from the AssistMe desktop app instead.
       </p>
     </div>
   );

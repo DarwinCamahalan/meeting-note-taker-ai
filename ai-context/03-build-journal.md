@@ -1,6 +1,6 @@
 # 03 — Build Journal (Phases 0→4, As-Built)
 
-> For future AI: this is the **history** of how Cue got built, reconstructed from `git log --oneline` and the actual commits — not the plan. Each phase maps to one PR and 2–3 feature commits on the `dev` branch. Where a phase shipped a stub, this file names it and points at [`07-todos-and-gaps.md`](07-todos-and-gaps.md). Start at [`../AGENTS.md`](../AGENTS.md), then [`00-overview.md`](00-overview.md).
+> For future AI: this is the **history** of how AssistMe got built, reconstructed from `git log --oneline` and the actual commits — not the plan. Each phase maps to one PR and 2–3 feature commits on the `dev` branch. Where a phase shipped a stub, this file names it and points at [`07-todos-and-gaps.md`](07-todos-and-gaps.md). Start at [`../AGENTS.md`](../AGENTS.md), then [`00-overview.md`](00-overview.md).
 
 ## The one thing to know first
 
@@ -110,7 +110,7 @@ gitGraph
 
 **What it added (real):**
 - **`@cue/db` migration `0001_enterprise.sql`** — `sso_connections` + `invitations` tables. (`0002_team_kb.sql` adds the document `visibility` column for the shared KB.)
-- **SSO/SCIM via WorkOS** (`@workos-inc/node`) — `SsoModule`: `GET /v1/sso/authorize` (org/domain → WorkOS AuthKit/SAML URL), `GET /v1/sso/callback` (code → profile → find/create user + membership → issue Cue ES256 JWT), connection CRUD, and `POST /v1/scim/webhook` (raw-body-verified directory sync → upsert/deactivate `orgMembers`). The **consumer PKCE path is untouched**.
+- **SSO/SCIM via WorkOS** (`@workos-inc/node`) — `SsoModule`: `GET /v1/sso/authorize` (org/domain → WorkOS AuthKit/SAML URL), `GET /v1/sso/callback` (code → profile → find/create user + membership → issue AssistMe ES256 JWT), connection CRUD, and `POST /v1/scim/webhook` (raw-body-verified directory sync → upsert/deactivate `orgMembers`). The **consumer PKCE path is untouched**.
 - **RBAC** — `@RequireRole('owner'|'admin'|'member')` + `RequireRoleGuard` resolving `orgMembers.role` against the route's `:orgId`; `@Audit(...)` + `AuditInterceptor` writing to `audit_logs`.
 - **Orgs / invites / members** — `OrgsModule` (create/list invites, list/update/remove members, accept invite).
 - **Admin** — `AdminModule` (org overview, settings, audit-log query, seats).

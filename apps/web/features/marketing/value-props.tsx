@@ -10,7 +10,7 @@ export function ValueProps() {
           Built to help you show up at your best
         </h2>
         <p className="mt-4 text-lg text-white/60">
-          Cue runs as an invisible overlay, listens with you, and offers
+          AssistMe runs as an invisible overlay, listens with you, and offers
           grounded suggestions — never in the way, never on the screen share.
         </p>
       </div>

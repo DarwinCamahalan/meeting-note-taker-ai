@@ -2,7 +2,7 @@
 
 > Status: Draft · Owner: Head of Product / Eng Lead · Last updated: 2026-07-29 · Related: [Executive summary](00-executive-summary.md) · [Product vision](01-product-vision.md) · [System architecture](02-system-architecture.md) · [Desktop app](10-desktop-app.md) · [Web landing](11-web-landing.md) · [AI pipeline](21-ai-pipeline.md) · [Backend services](20-backend-services.md) · [Subscriptions & entitlements](50-subscriptions-entitlements.md) · [DevOps & infra](60-devops-infrastructure.md) · [Scalability](70-scalability.md) · [Unit economics](71-unit-economics.md)
 
-This document sequences how **Cue** (provisional brand) gets built and taken to market. It is deliberately phase-gated: each phase has hard **exit criteria** that must be met before capital and headcount flow into the next. The two highest-risk unknowns — OS-level content-protection reliability and sub-1.2s live-cue latency — are front-loaded into a spike so we fail cheap if they fail.
+This document sequences how **AssistMe** (provisional brand; formerly Cue) gets built and taken to market. It is deliberately phase-gated: each phase has hard **exit criteria** that must be met before capital and headcount flow into the next. The two highest-risk unknowns — OS-level content-protection reliability and sub-1.2s live-cue latency — are front-loaded into a spike so we fail cheap if they fail.
 
 Everything here is consistent with the canonical stack. Where another doc owns a topic, this roadmap links rather than restates.
 
@@ -177,7 +177,7 @@ Durations are engineering estimates for the team shapes in §6, not commitments.
 
 ```mermaid
 gantt
-    title Cue — Phased Delivery (indicative, from 2026-08)
+    title AssistMe — Phased Delivery (indicative, from 2026-08)
     dateFormat  YYYY-MM-DD
     axisFormat  %b '%y
 

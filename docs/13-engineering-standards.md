@@ -2,7 +2,7 @@
 
 > Status: Draft · Owner: Principal Engineer (Platform) · Last updated: 2026-07-29 · Related: [Repository structure](03-repository-structure.md) · [Desktop app](10-desktop-app.md) · [Backend services](20-backend-services.md) · [Observability](61-observability.md) · [DevOps & infrastructure](60-devops-infrastructure.md) · [Design system](12-design-system.md)
 
-This document is the contract every engineer on **Cue** (provisional brand) signs up to. It defines how we write, structure, type, test, review, and ship code across the monorepo — `apps/desktop`, `apps/web`, the backend services (`api`, `ws-gateway`, `ai-orchestrator`, `entitlements`, `billing-webhooks`), and the shared `packages/*`. The rules here are enforced by CI and by tooling wherever possible; where they cannot be automated they are enforced in review.
+This document is the contract every engineer on **AssistMe** (provisional brand; formerly Cue) signs up to. It defines how we write, structure, type, test, review, and ship code across the monorepo — `apps/desktop`, `apps/web`, the backend services (`api`, `ws-gateway`, `ai-orchestrator`, `entitlements`, `billing-webhooks`), and the shared `packages/*`. The rules here are enforced by CI and by tooling wherever possible; where they cannot be automated they are enforced in review.
 
 The guiding principle: **code is read far more than it is written, and this is a latency-critical, security-sensitive product.** Clarity, small units, strong types, and fast feedback loops win over cleverness every time.
 

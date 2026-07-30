@@ -5,7 +5,7 @@ import { Wordmark } from '@/features/marketing/wordmark';
 
 export const metadata: Metadata = {
   title: 'Sign in with SSO',
-  description: 'Sign in to the Cue admin console with your organization SSO.',
+  description: 'Sign in to the AssistMe admin console with your organization SSO.',
   // Auth surface — keep it out of search indexes.
   robots: { index: false, follow: false },
 };

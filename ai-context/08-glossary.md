@@ -1,12 +1,12 @@
 # 08 — Glossary
 
-> For future AI: terms of art used across Cue's code and docs, defined as they are actually used in this repo (not generically). Where a term maps to a concrete symbol or path, that is named so you can jump straight to it. Cross-references point at the reference files that own the detail.
+> For future AI: terms of art used across AssistMe's code and docs, defined as they are actually used in this repo (not generically). Where a term maps to a concrete symbol or path, that is named so you can jump straight to it. Cross-references point at the reference files that own the detail.
 
 ## Product & client
 
 - **Overlay** — the Electron window that *is* the desktop product: transparent, always-on-top, frameless, rendering live transcript + cues. Toggled with `Cmd/Ctrl+\`. See [`reference/apps.md`](reference/apps.md).
 - **Content protection** — OS-level exclusion of a window from screen capture/share. `setContentProtection(true)` maps to macOS `NSWindowSharingType=none` and Windows `WDA_EXCLUDEFROMCAPTURE`. It hides the window **from capture surfaces only** — it does **not** hide the process from the OS process list, task manager, or antivirus (explicitly out of scope, [`../RULES.md`](../RULES.md)).
-- **Cue** — (a) the product name (provisional); (b) the unit of output: a short AI-generated suggestion / talking point / note streamed into the overlay in near-real-time.
+- **Cue** — (a) the product name, now **AssistMe** (provisional); (b) the unit of output: a short AI-generated suggestion / talking point / note streamed into the overlay in near-real-time.
 - **Content-protection UX / capture-invisibility** — the promise that the overlay is absent from Zoom/Meet/Teams/Webex screen-share and OS recorders. Tied to Phase 0 acceptance criteria A-1/A-2/A-3.
 - **Loopback / system audio** — the *other* party's audio (system output), as opposed to the user's **microphone**. Loopback capture is a **stub** today (`NotImplementedLoopbackCapture` in `@cue/core`); only mic capture is real. See [`07-todos-and-gaps.md`](07-todos-and-gaps.md).
 - **PCM / linear16 / AudioWorklet** — the mic path produces 16 kHz mono linear16 PCM chunks via `getUserMedia` + an AudioWorklet in the renderer.
@@ -42,13 +42,13 @@
 - **ws-gateway** — `@cue/ws-gateway` (`:3002`), the realtime edge: a Node `ws` server doing first-message JWT-ticket auth and relaying binary audio + JSON control to `ai-orchestrator` over one gRPC bidi stream per connection.
 - **gRPC bidi / `cue.orchestrator.v1`** — the `@cue/proto` contract for the bidirectional hot-path stream between `ws-gateway` and `ai-orchestrator`.
 - **PKCE / device-code** — the desktop OAuth2 auth flow: authorization-code-with-PKCE via device-code, opening the system browser to web `/activate?code=…`. The MVP auto-approves a dev user (`TODO(real IdP)`).
-- **ES256 JWT** — Cue's own access token, signed with an EC P-256 key. Dev signs with a local keypair; prod is meant to sign via KMS (`TODO(prod: KMS)`).
+- **ES256 JWT** — AssistMe's own access token, signed with an EC P-256 key. Dev signs with a local keypair; prod is meant to sign via KMS (`TODO(prod: KMS)`).
 - **ws ticket** — a short-lived JWT minted by `@cue/api` that the desktop app presents as the ws-gateway's first message to authenticate the socket.
 - **`@cue/sdk` / `CueApiClient`** — the typed client (resources like `documents`, `billing`, `sso`, `admin`) used by web and desktop to call the API.
 
 ## Enterprise, identity & billing
 
-- **SSO (single sign-on)** — enterprise login via **WorkOS** (AuthKit/SAML). `GET /v1/sso/authorize` returns the IdP URL; `/v1/sso/callback` exchanges the code, finds/creates the user + membership, and issues Cue's own ES256 JWT.
+- **SSO (single sign-on)** — enterprise login via **WorkOS** (AuthKit/SAML). `GET /v1/sso/authorize` returns the IdP URL; `/v1/sso/callback` exchanges the code, finds/creates the user + membership, and issues AssistMe's own ES256 JWT.
 - **SCIM (directory sync)** — automated user provisioning/deprovisioning. WorkOS posts signed events to `POST /v1/scim/webhook` (raw-body signature verified) → upsert/deactivate `orgMembers`.
 - **RBAC / roles (`owner` / `admin` / `member`)** — org membership roles (`orgRoleEnum`). Admin routes are gated by `@RequireRole('owner','admin')` + `RequireRoleGuard`, stacked after the JWT guard. RBAC answers **"who"**.
 - **Entitlement** — a feature-gate flag that is the **source of truth for "whether"** an org/user may use a feature. Enforced by the `@RequireEntitlement(key)` guard. Reconciled from Stripe subscription state, not hard-coded. (RBAC answers *who*; entitlements answer *whether* — e.g. the `team` entitlement gates the admin/SSO surface.)

@@ -36,7 +36,7 @@ export function DownloadGrid() {
         ))}
       </div>
       <p className="mt-4 text-xs text-white/35">
-        Cue {data.version} · released {new Date(data.releasedAt).toLocaleDateString()}
+        AssistMe {data.version} · released {new Date(data.releasedAt).toLocaleDateString()}
       </p>
     </div>
   );
