@@ -1,0 +1,26 @@
+appId: com.cue.desktop
+productName: Cue
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch:
+        - universal
+  # Accessory app: no Dock icon (set at runtime via app.dock.hide()).
+  extendInfo:
+    LSUIElement: true
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
