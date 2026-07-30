@@ -10,3 +10,5 @@ export * from './identity.contract.js';
 export * from './sessions.contract.js';
 export * from './documents.contract.js';
 export * from './billing.contract.js';
+export * from './sso.contract.js';
+export * from './admin.contract.js';

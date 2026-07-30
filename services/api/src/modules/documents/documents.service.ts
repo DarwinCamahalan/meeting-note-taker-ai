@@ -11,7 +11,7 @@
  * / binary sources; today `storageKey` is a sentinel for inline text.
  */
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, or, type SQL, sql } from 'drizzle-orm';
 import { documentChunks, documents } from '@cue/db';
 import type { NewDocument, NewDocumentChunk } from '@cue/db';
 import { chunkText } from '@cue/core';
@@ -19,9 +19,14 @@ import type { Document, DocumentUploadResponse, Paginated } from '@cue/types';
 import type { AuthContext } from '../../common/auth-context.js';
 import { internal, notFound } from '../../common/problem-details.js';
 import { DbService } from '../../database/db.service.js';
-import type { DocumentUploadRequestDto, ListDocumentsQueryDto } from '../../contracts/index.js';
+import type {
+  DocumentUploadRequestDto,
+  ListDocumentsQueryDto,
+  ListOrgDocumentsQueryDto,
+} from '../../contracts/index.js';
 import { EmbeddingsService } from './embeddings.service.js';
 import { toDocumentDto } from './documents.mapper.js';
+import { assertOrgManager, assertSameOrg } from './team-kb.access.js';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -59,6 +64,8 @@ export class DocumentsService {
       userId: ctx.userId,
       kind: body.kind,
       title: body.title,
+      // Default to the shared team KB; callers opt into a private upload.
+      visibility: body.visibility ?? 'org',
       storageKey: INLINE_STORAGE_KEY,
       mimeType: body.mimeType ?? null,
       byteSize: body.byteSize ?? null,
@@ -84,15 +91,82 @@ export class DocumentsService {
     return { document: toDocumentDto(document, chunks.length), chunkCount: chunks.length };
   }
 
-  /** Cursor-paginated list of the caller org's documents (newest first). */
+  /**
+   * Cursor-paginated list of documents the caller can see (newest first): the
+   * org's shared team KB PLUS the caller's own personal uploads.
+   */
   async list(ctx: AuthContext, query: ListDocumentsQueryDto): Promise<Paginated<Document>> {
+    return this.paginate(query, this.visibleScope(ctx));
+  }
+
+  /**
+   * Cursor-paginated list of the org's shared team KB (`visibility = 'org'`).
+   * Personal uploads are excluded. Any org member may read. `orgId` must be the
+   * caller's active org.
+   */
+  async listOrgKb(
+    ctx: AuthContext,
+    orgId: string,
+    query: ListOrgDocumentsQueryDto,
+  ): Promise<Paginated<Document>> {
+    assertSameOrg(ctx, orgId);
+    const scope = and(
+      eq(documents.orgId, ctx.orgId),
+      eq(documents.visibility, 'org'),
+    ) as SQL;
+    return this.paginate(query, scope);
+  }
+
+  /** Read one document the caller can see (shared KB or own personal). */
+  async get(ctx: AuthContext, id: string): Promise<Document> {
+    const [row] = await this.db.db
+      .select()
+      .from(documents)
+      .where(and(eq(documents.id, id), this.visibleScope(ctx)))
+      .limit(1);
+    if (!row) throw notFound('Document not found.');
+
+    const counts = await this.chunkCounts([row.id]);
+    return toDocumentDto(row, counts.get(row.id) ?? 0);
+  }
+
+  /**
+   * Remove a document from the org's shared team KB. Owners/admins only
+   * ("admins manage"); members are read-only. Chunk rows cascade via the FK.
+   */
+  async removeOrgDoc(ctx: AuthContext, orgId: string, documentId: string): Promise<void> {
+    assertSameOrg(ctx, orgId);
+    assertOrgManager(ctx);
+
+    const [row] = await this.db.db
+      .select({ id: documents.id })
+      .from(documents)
+      .where(and(eq(documents.id, documentId), eq(documents.orgId, ctx.orgId)))
+      .limit(1);
+    if (!row) throw notFound('Document not found.');
+
+    await this.db.db.delete(documents).where(eq(documents.id, row.id));
+  }
+
+  /** The caller's visible-document predicate: shared team KB OR own personal. */
+  private visibleScope(ctx: AuthContext): SQL {
+    const scope = and(
+      eq(documents.orgId, ctx.orgId),
+      or(eq(documents.visibility, 'org'), eq(documents.userId, ctx.userId)),
+    );
+    // `and` with non-empty args is always defined; assert for the return type.
+    return scope as SQL;
+  }
+
+  /** Shared keyset-pagination body over `documents`, given a base scope. */
+  private async paginate(
+    query: ListDocumentsQueryDto,
+    scope: SQL,
+  ): Promise<Paginated<Document>> {
     const limit = Math.min(query.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
     const cursor = query.cursor;
 
-    const where =
-      cursor !== undefined
-        ? and(eq(documents.orgId, ctx.orgId), lt(documents.id, cursor))
-        : eq(documents.orgId, ctx.orgId);
+    const where = cursor !== undefined ? and(scope, lt(documents.id, cursor)) : scope;
 
     const rows = await this.db.db
       .select()
@@ -112,19 +186,6 @@ export class DocumentsService {
       nextCursor: hasMore && last ? last.id : null,
       hasMore,
     };
-  }
-
-  /** Read one document (org-scoped). */
-  async get(ctx: AuthContext, id: string): Promise<Document> {
-    const [row] = await this.db.db
-      .select()
-      .from(documents)
-      .where(and(eq(documents.id, id), eq(documents.orgId, ctx.orgId)))
-      .limit(1);
-    if (!row) throw notFound('Document not found.');
-
-    const counts = await this.chunkCounts([row.id]);
-    return toDocumentDto(row, counts.get(row.id) ?? 0);
   }
 
   /** Count chunks per document id in one grouped query (empty ids -> empty map). */

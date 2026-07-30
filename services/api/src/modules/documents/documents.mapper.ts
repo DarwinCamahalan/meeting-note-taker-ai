@@ -15,6 +15,7 @@ export function toDocumentDto(row: DocumentRow, chunkCount: number): Document {
     kind: row.kind,
     title: row.title,
     status: row.status,
+    visibility: row.visibility,
     mimeType: row.mimeType,
     byteSize: row.byteSize,
     chunkCount,

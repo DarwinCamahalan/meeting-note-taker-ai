@@ -8,6 +8,7 @@ import type {
   DataRegion,
   DocumentKind,
   DocumentStatus,
+  DocumentVisibility,
   OrgRole,
   Plan,
   SessionKind,
@@ -55,6 +56,8 @@ export const DocumentStatusSchema = z.enum([
   'failed',
 ]);
 
+export const DocumentVisibilitySchema = z.enum(['personal', 'org']);
+
 /* ---- drift guards (enums) ---- */
 export type _PlanCheck = Assert<Equal<z.infer<typeof PlanSchema>, Plan>>;
 export type _RegionCheck = Assert<Equal<z.infer<typeof DataRegionSchema>, DataRegion>>;
@@ -64,3 +67,6 @@ export type _KindCheck = Assert<Equal<z.infer<typeof SessionKindSchema>, Session
 export type _StatusCheck = Assert<Equal<z.infer<typeof SessionStatusSchema>, SessionStatus>>;
 export type _DocKindCheck = Assert<Equal<z.infer<typeof DocumentKindSchema>, DocumentKind>>;
 export type _DocStatusCheck = Assert<Equal<z.infer<typeof DocumentStatusSchema>, DocumentStatus>>;
+export type _DocVisibilityCheck = Assert<
+  Equal<z.infer<typeof DocumentVisibilitySchema>, DocumentVisibility>
+>;

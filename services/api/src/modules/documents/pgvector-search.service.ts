@@ -4,9 +4,11 @@
  * top-k over `document_chunks` using the HNSW `vector_cosine_ops` index.
  *
  * Tenant safety (30 §5): the `org_id` filter is applied in the WHERE clause,
- * BEFORE ranking — never an unscoped ANN scan. `documentIds`, when given,
- * further narrows to a session's document scope. Cosine similarity is
- * `1 - (embedding <=> query)`, clamped to 0..1.
+ * BEFORE ranking — never an unscoped ANN scan. The team-KB visibility filter is
+ * applied in the same clause: org-shared chunks are always eligible, and the
+ * caller's own personal documents are included only when `userId` is supplied.
+ * `documentIds`, when given, further narrows to a session's document scope.
+ * Cosine similarity is `1 - (embedding <=> query)`, clamped to 0..1.
  */
 import { Injectable } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
@@ -36,6 +38,10 @@ export class PgVectorSearchService implements VectorSearchPort {
 
     // pgvector literal, bound as a parameter (never interpolated) then ::vector cast.
     const vectorLiteral = `[${queryEmbedding.join(',')}]`;
+    // Team-KB scope: org-shared docs always; personal docs only for their owner.
+    const visibilityFilter = params.userId
+      ? sql`AND (d.visibility = 'org' OR d.user_id = ${params.userId})`
+      : sql`AND d.visibility = 'org'`;
     const scopeFilter =
       params.documentIds && params.documentIds.length > 0
         ? sql`AND c.document_id = ANY(${params.documentIds})`
@@ -52,6 +58,7 @@ export class PgVectorSearchService implements VectorSearchPort {
       FROM document_chunks c
       JOIN documents d ON d.id = c.document_id
       WHERE c.org_id = ${orgId}
+      ${visibilityFilter}
       ${scopeFilter}
       ORDER BY c.embedding <=> ${vectorLiteral}::vector
       LIMIT ${topK}

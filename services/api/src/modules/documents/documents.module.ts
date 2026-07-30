@@ -10,10 +10,11 @@ import { DocumentsService } from './documents.service.js';
 import { EmbeddingsService } from './embeddings.service.js';
 import { PgVectorSearchService } from './pgvector-search.service.js';
 import { RetrievalService } from './retrieval.service.js';
+import { TeamKbController } from './team-kb.controller.js';
 
 @Module({
   imports: [AuthModule],
-  controllers: [DocumentsController],
+  controllers: [DocumentsController, TeamKbController],
   providers: [
     DocumentsService,
     EmbeddingsService,

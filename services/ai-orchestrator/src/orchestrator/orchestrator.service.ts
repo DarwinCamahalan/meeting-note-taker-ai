@@ -30,7 +30,11 @@ export class OrchestratorService {
   /** Build the optional RAG config for this session, if retrieval is enabled. */
   private ragConfig(start?: StartSession): { rag?: RagConfig } {
     if (!start?.orgId) return {};
-    const provider = this.rag.providerFor(start.orgId, start.documentIds ?? []);
+    const provider = this.rag.providerFor(
+      start.orgId,
+      start.userId || undefined,
+      start.documentIds ?? [],
+    );
     return provider ? { rag: { provider } } : {};
   }
 }

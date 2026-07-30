@@ -83,6 +83,73 @@ The `entitlements` table is the **source of truth** for feature gates. The
 `client.billing.createCheckout / portalLink / getEntitlements / usageSummary`,
 `client.documents.upload / list / get`, `client.users.entitlements()`.
 
+## Phase 3 surface (`@cue/api`)
+
+Phase 3 adds four NestJS modules to `@cue/api` (`SsoModule`, `OrgsModule`,
+`AdminModule`, plus a shared `RbacModule`) and extends `DocumentsModule` with the
+team-KB routes — all under the existing `:3001` BFF. Enterprise SSO/SCIM is
+backed by **WorkOS** (`@workos-inc/node`); the consumer PKCE path is untouched.
+RAG on the session hot path (`@cue/ai-orchestrator`) is org-scoped and applies
+the team-KB `visibility` filter before the ANN scan.
+
+### RBAC (shared) — `RbacModule`
+
+`@RequireRole('owner' | 'admin' | 'member')` decorator + `RequireRoleGuard`
+resolve the caller's `orgMembers.role` against the route's `:orgId` (Reflector
+reads `REQUIRE_ROLE_METADATA_KEY = 'cue:require-role'`), stacked after
+`JwtAuthGuard`. Admin-sensitive mutations are recorded via `@Audit(...)` +
+`AuditInterceptor` into the existing `audit_logs` table.
+
+### SSO / SCIM — `SsoModule`
+
+| Method + route | Auth | Purpose |
+| --- | --- | --- |
+| `GET /v1/sso/authorize` | public | `org`/`domain` → resolve the org's WorkOS connection → WorkOS AuthKit/SAML authorization URL (`SsoAuthorizeResponse`). |
+| `GET /v1/sso/callback` | WorkOS redirect | Exchange `code` → WorkOS profile → find/create `users` + `orgMembers` → issue Cue ES256 JWT. Server-only (no SDK method). |
+| `GET /v1/orgs/:orgId/sso/connections` | JWT + `RequireRole('owner','admin')` | List the org's SSO connections. |
+| `POST /v1/orgs/:orgId/sso/connections` | JWT + `RequireRole('owner','admin')` | Create an SSO connection (`CreateSsoConnectionRequest`). |
+| `DELETE /v1/orgs/:orgId/sso/connections/:connectionId` | JWT + `RequireRole('owner','admin')` | Delete an SSO connection. |
+| `POST /v1/scim/webhook` | **WorkOS-signed** (raw body) | Directory-sync provisioning/deprovisioning. Verify `WORKOS_WEBHOOK_SECRET` over the raw body → `dsync.user.*` / `dsync.group.user_*` → upsert/deactivate `orgMembers`. Server-only. |
+
+SDK: `client.sso.authorize / listConnections / createConnection / deleteConnection`.
+
+### Orgs (invites + members) — `OrgsModule`
+
+| Method + route | Auth | Purpose |
+| --- | --- | --- |
+| `POST /v1/orgs/:orgId/invites` | JWT + `RequireRole('owner','admin')` | Create an email+role invite (token). Audited `member.invite`. |
+| `GET /v1/orgs/:orgId/invites` | JWT + `RequireRole('owner','admin')` | List the org's invites. |
+| `GET /v1/orgs/:orgId/members` | JWT + `RequireRole('owner','admin')` | Cursor-paginated `Paginated<AdminMemberView>`. |
+| `PATCH /v1/orgs/:orgId/members/:userId` | JWT + `RequireRole('owner','admin')` | Change a member's role (`UpdateMemberRequest`). Audited `member.role.update`. |
+| `DELETE /v1/orgs/:orgId/members/:userId` | JWT + `RequireRole('owner','admin')` | Remove a member. Audited `member.remove`. |
+| `POST /v1/invites/accept` | JWT | Accept an invite by token (`AcceptInviteRequest`) → become an `orgMembers` row. |
+
+SDK: `client.admin.createInvite / listInvites / acceptInvite / listMembers / updateMember / removeMember`.
+
+### Admin (overview / settings / audit) — `AdminModule`
+
+| Method + route | Auth | Purpose |
+| --- | --- | --- |
+| `GET /v1/orgs/:orgId` | JWT + `RequireRole('owner','admin')` | Org overview (members, seats, entitlement snapshot). |
+| `GET /v1/orgs/:orgId/settings` | JWT + `RequireRole('owner','admin')` | Org settings (`OrgSettings`). |
+| `PATCH /v1/orgs/:orgId/settings` | JWT + `RequireRole('owner','admin')` | Update settings (`UpdateOrgSettingsRequest`). Audited `org.settings.update`. |
+| `GET /v1/orgs/:orgId/audit-logs` | JWT + `RequireRole('owner','admin')` | Query `audit_logs` (`ListAuditLogsQuery` → `Paginated<AuditLogEntry>`). |
+
+SDK: `client.admin.getOrgSettings / updateOrgSettings / auditLogs / seats`.
+
+### Team KB (shared documents) — `DocumentsModule`
+
+| Method + route | Auth | Purpose |
+| --- | --- | --- |
+| `GET /v1/orgs/:orgId/documents` | JWT (any member) | List the org's shared team KB (`visibility = 'org'`). |
+| `DELETE /v1/orgs/:orgId/documents/:documentId` | JWT (owner/admin) | Remove a shared team-KB document. |
+
+Retrieval (`PgVectorSearchService` in `@cue/api`, the `rag/` port in
+`@cue/ai-orchestrator`) filters `c.org_id = :orgId` and
+`visibility = 'org' OR user_id = :userId` **before** the cosine ANN scan, so
+every member retrieves the shared KB plus their own personal docs. `POST
+/v1/documents` accepts an optional `visibility` (`org` default | `personal`).
+
 ## Phase 1 TODOs (carried forward)
 
 - **Real IdP** — the `/activate` flow auto-approves a dev user. Swap for
