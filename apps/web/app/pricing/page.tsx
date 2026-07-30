@@ -31,7 +31,8 @@ export default function PricingPage() {
             <PricingTiers />
           </div>
           <p className="mt-10 text-center text-sm text-white/40">
-            Prices in USD. Checkout happens in the app after you sign in.
+            Prices in USD. Pro &amp; Team start secure Stripe Checkout; sign in
+            from the app if prompted.
           </p>
         </section>
       </main>

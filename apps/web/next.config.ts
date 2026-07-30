@@ -20,6 +20,11 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // Tree-shake drei's helper barrel so only the primitives the hero uses ship
+  // in the lazy 3D chunk (docs/11-web-landing.md §4.4).
+  experimental: {
+    optimizePackageImports: ['@react-three/drei'],
+  },
   async headers() {
     return [{ source: '/(.*)', headers: securityHeaders }];
   },
