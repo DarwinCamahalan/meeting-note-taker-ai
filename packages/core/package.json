@@ -1,0 +1,32 @@
+{
+  "name": "@cue/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cue AI pipeline: Deepgram streaming STT -> Claude streaming cue orchestration.",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.65.0",
+    "@cue/types": "workspace:*",
+    "@deepgram/sdk": "^3.9.0"
+  },
+  "devDependencies": {
+    "@cue/config": "workspace:*",
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3"
+  }
+}

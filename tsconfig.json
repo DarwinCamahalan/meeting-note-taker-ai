@@ -1,0 +1,9 @@
+{
+  "// note": "Root editor tsconfig. Each package/app owns its own build tsconfig extending @cue/config/tsconfig.base.json.",
+  "extends": "./packages/config/tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [],
+  "files": []
+}
