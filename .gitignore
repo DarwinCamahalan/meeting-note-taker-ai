@@ -5,8 +5,10 @@ node_modules/
 # Build output
 dist/
 out/
-build/
-release/
+# electron-builder installer output (electron-builder.yml directories.output: release).
+# NOTE: bare `build/` and `release/` are NOT ignored — they collide with source dirs
+# (apps/desktop/build = electron-builder buildResources; apps/web/lib/release = code).
+apps/desktop/release/
 .next/
 *.tsbuildinfo
 
