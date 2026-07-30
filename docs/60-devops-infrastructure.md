@@ -2,7 +2,7 @@
 
 > Status: Draft · Owner: Principal Architect (Infrastructure & Delivery) · Last updated: 2026-07-29 · Related: [System architecture](02-system-architecture.md) · [Backend services](20-backend-services.md) · [Data model](30-data-model.md) · [Web landing](11-web-landing.md) · [Desktop app](10-desktop-app.md) · [Observability](61-observability.md) · [Scalability](70-scalability.md) · [Unit economics](71-unit-economics.md)
 
-This doc owns how **Cue** is hosted, provisioned, and delivered: the AWS topology, Terraform layout, environments and promotion, the three CI/CD pipelines (web, backend services, and the desktop release + code-signing pipeline), secrets, backups, and disaster recovery. It does not define scaling policy in depth ([Scalability](70-scalability.md)) or the metric/alert catalog ([Observability](61-observability.md)) — it links to them.
+This doc owns how **AssistMe** is hosted, provisioned, and delivered: the AWS topology, Terraform layout, environments and promotion, the three CI/CD pipelines (web, backend services, and the desktop release + code-signing pipeline), secrets, backups, and disaster recovery. It does not define scaling policy in depth ([Scalability](70-scalability.md)) or the metric/alert catalog ([Observability](61-observability.md)) — it links to them.
 
 ---
 
@@ -18,7 +18,7 @@ This doc owns how **Cue** is hosted, provisioned, and delivered: the AWS topolog
 
 ## 2. AWS topology
 
-Cue runs on AWS ECS Fargate behind an ALB in each region, with a serverless-leaning data tier. The web marketing site is on Vercel (not AWS) and is covered in §6.1; installers and the update feed live on Cloudflare R2 + CDN so downloads never touch AWS egress (a deliberate COGS choice — see [Unit economics](71-unit-economics.md)).
+AssistMe runs on AWS ECS Fargate behind an ALB in each region, with a serverless-leaning data tier. The web marketing site is on Vercel (not AWS) and is covered in §6.1; installers and the update feed live on Cloudflare R2 + CDN so downloads never touch AWS egress (a deliberate COGS choice — see [Unit economics](71-unit-economics.md)).
 
 ```mermaid
 graph TB
@@ -334,8 +334,8 @@ flowchart TB
 
 | Runner | Target | Arch | Output |
 |---|---|---|---|
-| `macos-14` (Apple silicon) | `dmg`, `zip` | universal (arm64 + x64) | `Cue-1.4.0-universal.dmg`, `Cue-1.4.0-universal-mac.zip` |
-| `windows-2022` | `nsis` | x64 (arm64 in Phase 2) | `Cue Setup 1.4.0.exe` + `.blockmap` |
+| `macos-14` (Apple silicon) | `dmg`, `zip` | universal (arm64 + x64) | `AssistMe-1.4.0-universal.dmg`, `AssistMe-1.4.0-universal-mac.zip` |
+| `windows-2022` | `nsis` | x64 (arm64 in Phase 2) | `AssistMe Setup 1.4.0.exe` + `.blockmap` |
 
 The `.zip` on macOS is required by `electron-updater` for delta updates; the `.dmg` is the human download. The `.blockmap` on Windows enables differential (delta) downloads so an update transfers only changed blocks.
 
@@ -482,7 +482,7 @@ Redis is explicitly **not** a source of truth; entitlement/session state can be 
 
 ## 11. Software supply-chain program
 
-Everything Cue ships — backend images and, especially, the auto-updating desktop binary — is only as trustworthy as the pipeline that builds it. Because `electron-updater` can silently push a new binary to every user, an attacker who slips a malicious dependency, a leaked credential, or a tampered artifact into the build inherits our install base. This section defines the program that must be **live before `autoUpdater.autoDownload` is enabled** ([Desktop app §auto-update](10-desktop-app.md)); until then the desktop app checks for updates but requires an explicit user click, and the trust root (§7.7) is not yet complete.
+Everything AssistMe ships — backend images and, especially, the auto-updating desktop binary — is only as trustworthy as the pipeline that builds it. Because `electron-updater` can silently push a new binary to every user, an attacker who slips a malicious dependency, a leaked credential, or a tampered artifact into the build inherits our install base. This section defines the program that must be **live before `autoUpdater.autoDownload` is enabled** ([Desktop app §auto-update](10-desktop-app.md)); until then the desktop app checks for updates but requires an explicit user click, and the trust root (§7.7) is not yet complete.
 
 > **ADR-INF-06 — Supply-chain program gates `autoDownload`.**
 > - **Decision:** `autoDownload = false` until the six gates below plus independent manifest signing (§7.7) are enforced in CI and the desktop release pipeline. Enabling silent auto-update is a one-way trust decision and is treated as such.

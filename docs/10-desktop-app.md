@@ -2,7 +2,7 @@
 
 > Status: Draft · Owner: Desktop/Client Architecture · Last updated: 2026-07-29 · Related: [System architecture](02-system-architecture.md) · [Repository structure](03-repository-structure.md) · [Design system](12-design-system.md) · [Backend services](20-backend-services.md) · [AI pipeline](21-ai-pipeline.md) · [Authentication](40-authentication.md) · [DevOps & release pipeline](60-devops-infrastructure.md) · [Engineering standards](13-engineering-standards.md) · [Decision record](04-decision-record.md) · [Remediation plan](05-remediation-plan.md)
 
-The `desktop` app is the primary surface of Cue: a cross-platform (macOS + Windows) Electron client that renders a private, always-on-top, transparent teleprompter-style overlay, captures meeting audio, and streams it to the [`ws-gateway`](20-backend-services.md) for live transcription and AI cues. This document specifies the process model, the overlay window, content protection (with honest limitations), audio capture, IPC, global shortcuts, secure token storage, and auto-update.
+The `desktop` app is the primary surface of AssistMe: a cross-platform (macOS + Windows) Electron client that renders a private, always-on-top, transparent teleprompter-style overlay, captures meeting audio, and streams it to the [`ws-gateway`](20-backend-services.md) for live transcription and AI cues. This document specifies the process model, the overlay window, content protection (with honest limitations), audio capture, IPC, global shortcuts, secure token storage, and auto-update.
 
 ---
 
@@ -45,7 +45,7 @@ The `desktop` app is the primary surface of Cue: a cross-platform (macOS + Windo
 
 ## 3. Process model
 
-Cue runs a hardened multi-process model: a single **main** process, one **preload** bridge per window, and sandboxed **renderer** processes. `nodeIntegration` is off everywhere; renderers reach privileged capability only through a narrow, typed `contextBridge` surface.
+AssistMe runs a hardened multi-process model: a single **main** process, one **preload** bridge per window, and sandboxed **renderer** processes. `nodeIntegration` is off everywhere; renderers reach privileged capability only through a narrow, typed `contextBridge` surface.
 
 ```mermaid
 flowchart TB
@@ -181,7 +181,7 @@ Content protection makes the overlay a **local-only surface**: it renders on the
 
 ```mermaid
 flowchart LR
-    subgraph APP["Cue overlay window"]
+    subgraph APP["AssistMe overlay window"]
         CP["setContentProtection(true)"]
     end
     CP --> MAC["macOS: NSWindow.sharingType = .none"]
@@ -245,7 +245,7 @@ Content protection is strong but **not absolute**. We document these so we never
 | **Certain legacy capture paths** | Some `BitBlt`/`PrintWindow` or GDI-based screenshot tools on Windows, and a few remote-desktop stacks, may not honor affinity. | Enumerated in the test matrix; flagged as unsupported/risky. |
 | **Accessibility / screen readers** | The overlay is still readable by the local user's assistive tech (by design). | Intended behavior. |
 | **Remote control / RMM tools** | Screen-sharing that operates below the compositor (some enterprise RMM) may capture regardless. | Documented; enterprise admins are informed. |
-| **OS process visibility** | The overlay is hidden from screen capture, taskbar/Dock, and screen-share window pickers — **but the `Cue` process remains fully visible in Task Manager / Activity Monitor / `ps` and to antivirus/EDR.** | **We do not and will not hide the process.** See §5.4. |
+| **OS process visibility** | The overlay is hidden from screen capture, taskbar/Dock, and screen-share window pickers — **but the `AssistMe` process remains fully visible in Task Manager / Activity Monitor / `ps` and to antivirus/EDR.** | **We do not and will not hide the process.** See §5.4. |
 
 ### 5.3 Verification: the invisibility test matrix
 
@@ -280,7 +280,7 @@ A failure on any **gate** row blocks the release. Non-gate rows are tracked and 
 There is a hard line between two very different things:
 
 - **What we do (legitimate & standard):** exclude the overlay from *screen capture / screen share*, hide it from the *taskbar/Dock* and from *screen-share window pickers* (which read the OS window-enumeration list). These are supported OS features used by mainstream security apps.
-- **What we deliberately do NOT do:** hide the `Cue` process from the OS process list, spoof its name, evade antivirus/EDR, defeat MDM inventory, or otherwise make the software undetectable on the machine. That is malware behavior, it would jeopardize signing/notarization, and it is out of scope by design.
+- **What we deliberately do NOT do:** hide the `AssistMe` process from the OS process list, spoof its name, evade antivirus/EDR, defeat MDM inventory, or otherwise make the software undetectable on the machine. That is malware behavior, it would jeopardize signing/notarization, and it is out of scope by design.
 
 This boundary is a product commitment, not just an implementation detail. (Acceptable-use / disclosed-mode policy is out of scope for the current planning pass.)
 
@@ -288,7 +288,7 @@ This boundary is a product commitment, not just an implementation detail. (Accep
 
 ## 6. Audio capture
 
-Cue captures two streams — **system/loopback audio** (the other participants) and the **user's microphone** — and forwards PCM chunks to the [`ws-gateway`](20-backend-services.md), which fans out to the [AI pipeline](21-ai-pipeline.md).
+AssistMe captures two streams — **system/loopback audio** (the other participants) and the **user's microphone** — and forwards PCM chunks to the [`ws-gateway`](20-backend-services.md), which fans out to the [AI pipeline](21-ai-pipeline.md).
 
 ### 6.1 Platform capture backends
 
@@ -346,7 +346,7 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant App as Cue (main)
+    participant App as AssistMe (main)
     participant OS as OS permission (TCC / Privacy)
 
     U->>App: Start session
@@ -527,7 +527,7 @@ The desktop app updates itself from the same signed release feed the [web downlo
 
 ```mermaid
 sequenceDiagram
-    participant App as Cue (main)
+    participant App as AssistMe (main)
     participant Feed as CDN release feed
     participant User
 

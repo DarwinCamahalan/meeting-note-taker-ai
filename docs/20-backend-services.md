@@ -2,7 +2,7 @@
 
 > Status: Draft · Owner: Principal Architect (Backend) · Last updated: 2026-07-29 · Related: [System architecture](02-system-architecture.md) · [Repository structure](03-repository-structure.md) · [AI pipeline](21-ai-pipeline.md) · [Data model](30-data-model.md) · [Authentication](40-authentication.md) · [Entitlements](50-subscriptions-entitlements.md) · [Payments (Stripe)](51-payments-stripe.md) · [DevOps / infra](60-devops-infrastructure.md) · [Observability](61-observability.md) · [Scalability](70-scalability.md)
 
-This doc owns the **backend service topology** for Cue: what each service does, how it is structured internally, the contracts between them, and the two client-facing surfaces (the REST/BFF API and the realtime WebSocket protocol). It does not re-derive the AI latency budget (that is [AI pipeline](21-ai-pipeline.md)), the SQL schema ([Data model](30-data-model.md)), the auth token exchange ([Authentication](40-authentication.md)), or the Fargate/Terraform wiring ([DevOps](60-devops-infrastructure.md)) — those are summarized in one line and linked.
+This doc owns the **backend service topology** for AssistMe: what each service does, how it is structured internally, the contracts between them, and the two client-facing surfaces (the REST/BFF API and the realtime WebSocket protocol). It does not re-derive the AI latency budget (that is [AI pipeline](21-ai-pipeline.md)), the SQL schema ([Data model](30-data-model.md)), the auth token exchange ([Authentication](40-authentication.md)), or the Fargate/Terraform wiring ([DevOps](60-devops-infrastructure.md)) — those are summarized in one line and linked.
 
 ---
 

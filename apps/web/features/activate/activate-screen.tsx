@@ -18,7 +18,7 @@ export function ActivateScreen() {
         <SuccessGlyph />
         <h2 className="mt-4 text-xl font-semibold">Device approved</h2>
         <p className="mt-2 text-sm text-white/60">
-          You can return to the Cue desktop app — it will finish signing in
+          You can return to the AssistMe desktop app — it will finish signing in
           automatically.
         </p>
       </div>
@@ -27,9 +27,9 @@ export function ActivateScreen() {
 
   return (
     <div className="surface-card">
-      <h2 className="text-xl font-semibold">Activate Cue on your computer</h2>
+      <h2 className="text-xl font-semibold">Activate AssistMe on your computer</h2>
       <p className="mt-2 text-sm text-white/60">
-        Confirm this is the code shown in the Cue desktop app, then approve to
+        Confirm this is the code shown in the AssistMe desktop app, then approve to
         finish signing in.
       </p>
 
@@ -58,7 +58,7 @@ export function ActivateScreen() {
       )}
 
       <p className="mt-6 text-xs text-white/35">
-        Only approve if you just started sign-in from the Cue app on this device.
+        Only approve if you just started sign-in from the AssistMe app on this device.
       </p>
 
       <div className="mt-6 border-t border-white/10 pt-4 text-center">

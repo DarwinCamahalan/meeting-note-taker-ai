@@ -208,17 +208,17 @@ account (dashboard or CLI), then paste the ids in:
 
 ```bash
 # Pro — flat $20/mo (recurring licensed)
-stripe products create --name "Cue Pro"
+stripe products create --name "AssistMe Pro"
 stripe prices create --product <prod_pro> \
   --unit-amount 2000 --currency usd -d "recurring[interval]=month"      # -> STRIPE_PRICE_PRO
 
 # Team — $30/seat/mo (recurring licensed, per-seat quantity)
-stripe products create --name "Cue Team"
+stripe products create --name "AssistMe Team"
 stripe prices create --product <prod_team> \
   --unit-amount 3000 --currency usd -d "recurring[interval]=month"      # -> STRIPE_PRICE_TEAM
 
 # Overage — metered $0.13/live-minute, attached as a second subscription item
-stripe products create --name "Cue Live-Minute Overage"
+stripe products create --name "AssistMe Live-Minute Overage"
 stripe prices create --product <prod_overage> --currency usd \
   -d "recurring[interval]=month" -d "recurring[usage_type]=metered" \
   -d "recurring[aggregate_usage]=sum" -d "billing_scheme=per_unit" \
@@ -324,7 +324,7 @@ there, and copy the directory-sync/webhook signing secret into
    redirects to `WORKOS_REDIRECT_URI` → `GET /v1/sso/callback?code=…`.
 3. The callback exchanges the code for the WorkOS profile, **finds or creates**
    the `users` row and its `orgMembers` membership (default role `member`), and
-   issues Cue's own ES256 JWT — the same token the rest of the API consumes.
+   issues AssistMe's own ES256 JWT — the same token the rest of the API consumes.
    From here the session is indistinguishable from a PKCE session.
 
 Admins manage the connection itself from the admin console (or the SDK
@@ -404,7 +404,7 @@ See [`services/README.md`](services/README.md) for the full Phase 3 endpoint map
 
 ## Getting started — Phase 4 (Scale & Ops)
 
-Phase 4 makes Cue operable at scale without changing any Phase 0–3 behaviour.
+Phase 4 makes AssistMe operable at scale without changing any Phase 0–3 behaviour.
 It adds **observability** (`@cue/observability`), **Terraform IaC** (`infra/`),
 **GitHub Actions CI/CD** (`.github/workflows/`), and **reliability/scale**
 plumbing (circuit breakers, graceful degradation, Redis rate limiting, WS

@@ -2,7 +2,7 @@
 
 > Status: Draft · Owner: Principal Architect (Reliability & Operations) · Last updated: 2026-07-29 · Related: [System architecture](02-system-architecture.md) · [DevOps & infrastructure](60-devops-infrastructure.md) · [Backend services](20-backend-services.md) · [AI pipeline](21-ai-pipeline.md) · [Desktop app](10-desktop-app.md) · [Scalability](70-scalability.md) · [Data model](30-data-model.md)
 
-This doc owns how we know **Cue** is healthy: the three pillars (logs, metrics, traces), product analytics + feature flags, crash reporting, the SLO/SLI/error-budget catalog tied to the [non-functional targets](02-system-architecture.md), alerting + on-call + runbooks, and the hard rule that telemetry never carries transcript content or PII. Infra provisioning of these tools lives in [DevOps](60-devops-infrastructure.md); this doc defines *what* we measure and *how we respond*.
+This doc owns how we know **AssistMe** is healthy: the three pillars (logs, metrics, traces), product analytics + feature flags, crash reporting, the SLO/SLI/error-budget catalog tied to the [non-functional targets](02-system-architecture.md), alerting + on-call + runbooks, and the hard rule that telemetry never carries transcript content or PII. Infra provisioning of these tools lives in [DevOps](60-devops-infrastructure.md); this doc defines *what* we measure and *how we respond*.
 
 ---
 

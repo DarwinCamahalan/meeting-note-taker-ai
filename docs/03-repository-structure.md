@@ -2,7 +2,7 @@
 
 > Status: Draft · Owner: Principal Architect (Platform) · Last updated: 2026-07-29 · Related: [System architecture](02-system-architecture.md) · [Desktop app](10-desktop-app.md) · [Web landing](11-web-landing.md) · [Design system](12-design-system.md) · [Engineering standards](13-engineering-standards.md) · [Backend services](20-backend-services.md) · [DevOps](60-devops-infrastructure.md)
 
-This doc defines the **Cue** monorepo layout, its pnpm + Turborepo tooling, package-boundary rules, the shared TypeScript config, and — critically — how the house code-splitting standard (`types.ts` / `utils.ts` / `hooks/use-*.ts` / focused components, files under 700 LOC, pages orchestrate) maps concretely onto each app. It complements [Engineering standards](13-engineering-standards.md) (which owns testing, review, branching, CI gates) — this doc owns *where code lives and why*.
+This doc defines the **AssistMe** monorepo layout, its pnpm + Turborepo tooling, package-boundary rules, the shared TypeScript config, and — critically — how the house code-splitting standard (`types.ts` / `utils.ts` / `hooks/use-*.ts` / focused components, files under 700 LOC, pages orchestrate) maps concretely onto each app. It complements [Engineering standards](13-engineering-standards.md) (which owns testing, review, branching, CI gates) — this doc owns *where code lives and why*.
 
 ---
 

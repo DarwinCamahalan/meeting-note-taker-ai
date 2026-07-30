@@ -1,6 +1,6 @@
 appId: com.cue.desktop
-productName: Cue
-copyright: Copyright © 2026 Cue
+productName: AssistMe
+copyright: Copyright © 2026 AssistMe
 directories:
   output: release
   buildResources: build
@@ -44,10 +44,10 @@ mac:
     # OS-provided — but mic/camera do, and Apple rejects hardened builds that
     # touch these devices without a usage description.
     NSMicrophoneUsageDescription: >-
-      Cue listens to your meeting or interview audio to transcribe it and
+      AssistMe listens to your meeting or interview audio to transcribe it and
       generate real-time cues. Audio is processed for the active session only.
     NSCameraUsageDescription: >-
-      Cue may use the camera for video-call awareness during a live session.
+      AssistMe may use the camera for video-call awareness during a live session.
       No video is recorded or stored.
 
 # ---------------------------------------------------------------------------

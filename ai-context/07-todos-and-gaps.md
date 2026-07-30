@@ -1,6 +1,6 @@
 # 07 — TODOs & Gaps (What's Real vs Stubbed)
 
-> For future AI: this is the honest inventory. Cue's `dev` branch is a **working thin slice**, not a production system — many production behaviors ship as dev-grade fallbacks or loud stubs. Every entry below is grep-verified against real source with a file path. Before you rely on a feature, check it here. Read [`04-plan-mapping.md`](04-plan-mapping.md) for how these gaps map to the plan, and [`03-build-journal.md`](03-build-journal.md) for when each was introduced.
+> For future AI: this is the honest inventory. AssistMe's `dev` branch is a **working thin slice**, not a production system — many production behaviors ship as dev-grade fallbacks or loud stubs. Every entry below is grep-verified against real source with a file path. Before you rely on a feature, check it here. Read [`04-plan-mapping.md`](04-plan-mapping.md) for how these gaps map to the plan, and [`03-build-journal.md`](03-build-journal.md) for when each was introduced.
 
 ## The short version
 

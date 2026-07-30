@@ -1,8 +1,8 @@
-# Design System — Cue
+# Design System — AssistMe
 
 > Status: Draft · Owner: Head of Design / Design Systems Lead · Last updated: 2026-07-29 · Related: [Product Vision](01-product-vision.md) · [Desktop App](10-desktop-app.md) · [Web Landing](11-web-landing.md) · [Engineering Standards](13-engineering-standards.md) · [Repository Structure](03-repository-structure.md)
 
-This document defines the visual and interaction language for **Cue** (provisional brand name), the single source of truth for design tokens, and the shared `packages/ui` component library consumed by both `apps/web` (Next.js) and `apps/desktop` (Electron renderer). It owns the **overlay UX** — the teleprompter surface that is the product's beating heart — and the **accessibility** posture across both surfaces.
+This document defines the visual and interaction language for **AssistMe** (provisional brand name; formerly Cue), the single source of truth for design tokens, and the shared `packages/ui` component library consumed by both `apps/web` (Next.js) and `apps/desktop` (Electron renderer). It owns the **overlay UX** — the teleprompter surface that is the product's beating heart — and the **accessibility** posture across both surfaces.
 
 It does **not** own the marketing site's 3D hero (see [Web Landing](11-web-landing.md)) or the Electron windowing/content-protection internals (see [Desktop App](10-desktop-app.md)). It defines the tokens and components those docs consume.
 
@@ -10,10 +10,10 @@ It does **not** own the marketing site's 3D hero (see [Web Landing](11-web-landi
 
 ## 1. Design principles
 
-Cue is a tool people use *while under pressure* — mid-interview, mid-sales-call, mid-standup. The design language is engineered for **peripheral cognition**: the user glances, absorbs, and returns their attention to the human on the call. Every decision below serves that.
+AssistMe is a tool people use *while under pressure* — mid-interview, mid-sales-call, mid-standup. The design language is engineered for **peripheral cognition**: the user glances, absorbs, and returns their attention to the human on the call. Every decision below serves that.
 
 1. **Glanceable over comprehensive.** The overlay is read in <500ms peripheral glances, not studied. Hierarchy, size, and contrast are tuned for recognition, not reading comprehension.
-2. **Calm, never demanding.** No color that screams, no motion that grabs. Cue must never pull the user's gaze harder than the person they are talking to. Attention is the scarcest resource on a live call.
+2. **Calm, never demanding.** No color that screams, no motion that grabs. AssistMe must never pull the user's gaze harder than the person they are talking to. Attention is the scarcest resource on a live call.
 3. **Invisible by default.** The product's core promise is discretion. The visual language is restrained, dark-first, low-chroma. The overlay must look like nothing when idle.
 4. **Confidence through legibility.** Type, spacing, and contrast are dialed for readability under stress and poor lighting (users on laptops, in cafes, in bad video-call lighting).
 5. **One system, two surfaces.** Web (marketing/dashboard) and desktop (overlay/settings) share one token graph. Divergence is a bug.
@@ -21,7 +21,7 @@ Cue is a tool people use *while under pressure* — mid-interview, mid-sales-cal
 
 ### ADR-001 — Dark-first, low-chroma palette as the default identity
 
-- **Decision:** Cue's default and canonical theme is dark, with a deliberately low-saturation accent. Light theme is a first-class alternate but the brand is expressed in dark.
+- **Decision:** AssistMe's default and canonical theme is dark, with a deliberately low-saturation accent. Light theme is a first-class alternate but the brand is expressed in dark.
 - **Context:** The overlay floats over video calls, screen shares, and IDEs, mostly on dark or mixed backgrounds. A bright/high-chroma identity would be visually loud, betray the "discreet" promise, and fatigue users over long sessions.
 - **Alternatives considered:** (a) Bright SaaS-blue identity — rejected as attention-grabbing and generic; (b) pure grayscale — rejected as cold and undifferentiated; (c) neon "AI" aesthetic — rejected as gimmicky and low-legibility.
 - **Trade-offs:** Dark-first requires extra rigor on light-theme contrast and on marketing pages that convention expects to be bright. We accept that cost.
@@ -36,12 +36,12 @@ Cue is a tool people use *while under pressure* — mid-interview, mid-sales-cal
 | **Personality** | Composed, precise, quietly competent. A great executive assistant, not a hype-man. |
 | **Logo/wordmark** | Lowercase `cue`, geometric sans, tight tracking. A single "cue dot" (●) glyph used as the app/tray icon and the overlay's idle indicator. |
 | **Tone in UI copy** | Direct, short, second person. "Listening…", "Ready when you are.", "No audio detected — check your input device." Never coy, never anthropomorphized ("I think you should…"). |
-| **Tone in overlay cues** | The AI's suggested content is visually and typographically distinct from Cue's own system chrome. Users must always know *what is the machine's suggestion* vs *what is Cue talking to them*. |
+| **Tone in overlay cues** | The AI's suggested content is visually and typographically distinct from AssistMe's own system chrome. Users must always know *what is the machine's suggestion* vs *what is AssistMe talking to them*. |
 | **Motion feel** | Ease-out, short, damped. Things settle; nothing bounces. |
 
 ### Voice rules for cue content vs system chrome
 
-A hard rule that drives component design: **AI-generated suggestion text** and **Cue's own interface text** are never styled the same. Cue chrome uses `--text-muted` at smaller sizes; AI cues use `--text-primary` at the reading size. This prevents the user from ever reading a system status as something to say aloud — a real failure mode for a teleprompter product.
+A hard rule that drives component design: **AI-generated suggestion text** and **AssistMe's own interface text** are never styled the same. AssistMe chrome uses `--text-muted` at smaller sizes; AI cues use `--text-primary` at the reading size. This prevents the user from ever reading a system status as something to say aloud — a real failure mode for a teleprompter product.
 
 ---
 
@@ -122,7 +122,7 @@ The semantic layer is what components use. Below, the canonical dark values and 
 | `--bg-overlay` | `rgba(10,11,15,0.72)` | `rgba(10,11,15,0.72)` | overlay backplate (see §5) |
 | `--text-primary` | `gray-50` | `gray-900` | AI cues, headings — ≥ 7:1 (AAA) |
 | `--text-secondary` | `gray-300` | `gray-600` | body — ≥ 4.5:1 |
-| `--text-muted` | `gray-400` | `gray-500` | Cue chrome/status — ≥ 4.5:1 |
+| `--text-muted` | `gray-400` | `gray-500` | AssistMe chrome/status — ≥ 4.5:1 |
 | `--border-subtle` | `gray-700` | `gray-200` | dividers |
 | `--border-strong` | `gray-600` | `gray-300` | inputs, focus base |
 | `--accent` | `accent-400` | `accent-600` | primary actions, active states |
@@ -229,7 +229,7 @@ Theme is switched by setting `data-theme="light|dark"` (and `data-contrast="high
 - **Headless-first.** Interactive primitives (Dialog, Popover, Menu, Tooltip, Switch, Tabs, Slider) wrap **Radix UI** for correct ARIA/focus/keyboard behavior; we own the styling via tokens. This buys us accessibility we would otherwise get wrong.
 - **Styling engine.** Tailwind v4 utility classes bound to our CSS variables, composed with `cva` (class-variance-authority) for variants and `tailwind-merge` for safe overrides. No CSS-in-JS runtime.
 - **Isomorphic.** Every component must render in the Next.js server component tree *and* the Electron renderer. Components that need browser APIs are marked `'use client'` and kept leaf-level. No component imports `electron` or `next/*` directly — platform concerns are injected via props/context.
-- **Icons.** `lucide-react`, tree-shaken. A small custom set for Cue-specific glyphs (cue dot, waveform) as inline SVG React components.
+- **Icons.** `lucide-react`, tree-shaken. A small custom set for AssistMe-specific glyphs (cue dot, waveform) as inline SVG React components.
 
 ### ADR-003 — Radix primitives + Tailwind v4 + cva, no component-level CSS-in-JS
 
@@ -469,7 +469,7 @@ export interface CueCardProps {
 
 ## 6. Accessibility
 
-Accessibility is a **primary market**, not compliance theater — the anxiety/ADHD/hearing-difficulty/non-native personas are core (see [Product Vision](01-product-vision.md)). Cue is, for many users, itself an assistive technology.
+Accessibility is a **primary market**, not compliance theater — the anxiety/ADHD/hearing-difficulty/non-native personas are core (see [Product Vision](01-product-vision.md)). AssistMe is, for many users, itself an assistive technology.
 
 ### 6.1 Standards & targets
 
@@ -490,7 +490,7 @@ Accessibility is a **primary market**, not compliance theater — the anxiety/AD
 
 The overlay is a genuinely unusual SR case: it's a private HUD over someone else's call. Rules:
 
-- The overlay window exposes an ARIA live region (`aria-live="polite"`, `aria-atomic="false"`) so new cues are announced — invaluable for low-vision users using Cue as a reading aid. **User-controllable**: announcements can be off (default in Answer mode, since a screen reader speaking cues aloud could be heard) or on (the reading-aid use case). This tension is called out as an open question below.
+- The overlay window exposes an ARIA live region (`aria-live="polite"`, `aria-atomic="false"`) so new cues are announced — invaluable for low-vision users using AssistMe as a reading aid. **User-controllable**: announcements can be off (default in Answer mode, since a screen reader speaking cues aloud could be heard) or on (the reading-aid use case). This tension is called out as an open question below.
 - Semantic roles: `StateIndicator` uses `role="status"`; `ControlBar` buttons have explicit `aria-label`s and `aria-keyshortcuts` matching §5.5; the mode control is a labeled group.
 - Full keyboard operability (§5.5) means no mouse-only path exists.
 - Marketing site: landmarks, skip-link, alt text, captions on all demo videos, and the 3D hero has a reduced-motion + fully-described static fallback (see [Web Landing](11-web-landing.md)).
@@ -541,5 +541,5 @@ Implementation: overlay animations use CSS transitions + the Web Animations API 
 - **User-adjustable overlay tokens vs guaranteed AAA.** If a user sets opacity to 0.35 and font size to 16px over a busy background, we can no longer *guarantee* AAA. Do we hard-floor certain combinations, or warn and defer to the user? Leaning toward soft warnings + a "restore readable defaults" hotkey.
 - **Font licensing/self-hosting.** Inter + JetBrains Mono are OFL and safe to self-host; confirm the final brand wordmark font's license before launch (the provisional `cue` wordmark may need a licensed or custom face).
 - **`backdrop-filter` performance & capture behavior.** Confirm blur doesn't interact badly with `WDA_EXCLUDEFROMCAPTURE` / `NSWindowSharingType=none` on all target OS versions, and that it stays GPU-cheap during long sessions (owned jointly with [Desktop App](10-desktop-app.md)).
-- **Brand name is provisional.** "Cue" and the cue-dot mark are placeholders; a naming/trademark pass may force a palette/wordmark revision. Tokens are name-agnostic, so churn is contained to the wordmark and icon assets.
+- **Brand name is provisional.** "AssistMe" and the cue-dot mark are placeholders; a naming/trademark pass may force a palette/wordmark revision. Tokens are name-agnostic, so churn is contained to the wordmark and icon assets.
 - **Windows forced-colors coverage.** Full `forced-colors: active` support for the overlay (a non-standard surface) needs testing across Windows 10/11 high-contrast themes.

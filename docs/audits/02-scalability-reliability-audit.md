@@ -1,4 +1,4 @@
-# Scalability & Reliability Audit — Cue
+# Scalability & Reliability Audit — AssistMe
 
 > Status: Complete · Owner: Due-Diligence Reviewer (Scalability & Reliability) · Last updated: 2026-07-29
 > Scope: `02-system-architecture.md`, `20-backend-services.md`, `21-ai-pipeline.md`, `30-data-model.md`, `61-observability.md`, `70-scalability.md`

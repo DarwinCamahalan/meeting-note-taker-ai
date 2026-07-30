@@ -41,7 +41,7 @@ export const VALUE_PROPS: readonly ValueProp[] = [
   {
     icon: 'docs',
     title: 'Grounded in your context',
-    body: 'Bring your resume, job description, or knowledge base. Cue answers from what actually matters.',
+    body: 'Bring your resume, job description, or knowledge base. AssistMe answers from what actually matters.',
   },
 ];
 

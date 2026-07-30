@@ -4,11 +4,11 @@
  */
 
 export const SITE = {
-  name: 'Cue',
+  name: 'AssistMe',
   /** Provisional brand — see docs/01-product-vision.md. */
   tagline: 'Your private AI copilot for live meetings and interviews.',
   description:
-    'Cue is a content-protected desktop overlay that transcribes your call in real time and surfaces AI cues only you can see — for interviews, sales, support, and meeting notes.',
+    'AssistMe is a content-protected desktop overlay that transcribes your call in real time and surfaces AI cues only you can see — for interviews, sales, support, and meeting notes.',
 } as const;
 
 /** Public site origin, used for canonical/OG URLs. */

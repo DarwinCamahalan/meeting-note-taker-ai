@@ -2,7 +2,7 @@
 
 > Status: Draft · Owner: Principal Architect (Platform) · Last updated: 2026-07-29 · Related: [Decision record](04-decision-record.md) · [Remediation plan](05-remediation-plan.md) · [System architecture](02-system-architecture.md) · [Backend services](20-backend-services.md) · [AI pipeline](21-ai-pipeline.md) · [Data model](30-data-model.md) · [Authentication](40-authentication.md) · [DevOps / infra](60-devops-infrastructure.md) · [Observability](61-observability.md) · [Unit economics](71-unit-economics.md)
 
-This doc owns **how Cue stays fast and up as concurrent live sessions grow**. It identifies the five load-bearing bottlenecks, gives each a scaling strategy, derives a **capacity model** (assumptions → required `ws-gateway` instances, STT concurrency, LLM throughput), defines the **multi-region / data-residency** topology, and specifies the **resilience patterns** (circuit breakers, retries, graceful degradation, backpressure) and the **load-testing plan**.
+This doc owns **how AssistMe stays fast and up as concurrent live sessions grow**. It identifies the five load-bearing bottlenecks, gives each a scaling strategy, derives a **capacity model** (assumptions → required `ws-gateway` instances, STT concurrency, LLM throughput), defines the **multi-region / data-residency** topology, and specifies the **resilience patterns** (circuit breakers, retries, graceful degradation, backpressure) and the **load-testing plan**.
 
 It does not re-derive the latency budget (that is [AI pipeline §4](21-ai-pipeline.md)), the service internals ([Backend services](20-backend-services.md)), the Terraform/Fargate wiring ([DevOps](60-devops-infrastructure.md)), or the cost math ([Unit economics](71-unit-economics.md)) — each is summarized in one line and linked.
 
@@ -12,7 +12,7 @@ It does not re-derive the latency budget (that is [AI pipeline §4](21-ai-pipeli
 
 ## 1. What actually scales — and what doesn't
 
-Cue has two fundamentally different load curves, established in [Backend services ADR](20-backend-services.md):
+AssistMe has two fundamentally different load curves, established in [Backend services ADR](20-backend-services.md):
 
 | Surface | Load unit | Curve | Scaling axis |
 |---|---|---|---|

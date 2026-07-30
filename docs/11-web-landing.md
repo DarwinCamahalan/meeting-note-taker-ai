@@ -2,7 +2,7 @@
 
 > Status: Draft · Owner: Web / Frontend Architect · Last updated: 2026-07-29 · Related: [Product vision](01-product-vision.md) · [System architecture](02-system-architecture.md) · [Repository structure](03-repository-structure.md) · [Desktop app](10-desktop-app.md) · [Design system](12-design-system.md) · [Engineering standards](13-engineering-standards.md) · [DevOps & release pipeline](60-devops-infrastructure.md) · [Observability](61-observability.md) · [Legal & compliance](../docs/README.md)
 
-The marketing site (`apps/web`) is the public face of **Cue** (provisional brand). It has three jobs: (1) explain and sell the product, (2) hand the right signed installer to the right OS, and (3) feed the same release manifest that powers in-app auto-update. It is a **Next.js 15 App Router** app on **Vercel**. It never hosts installer binaries itself — those live on R2/S3 behind CloudFront (see [DevOps](60-devops-infrastructure.md)).
+The marketing site (`apps/web`) is the public face of **AssistMe** (provisional brand; formerly Cue). It has three jobs: (1) explain and sell the product, (2) hand the right signed installer to the right OS, and (3) feed the same release manifest that powers in-app auto-update. It is a **Next.js 15 App Router** app on **Vercel**. It never hosts installer binaries itself — those live on R2/S3 behind CloudFront (see [DevOps](60-devops-infrastructure.md)).
 
 This doc owns: App Router route map, the 3D hero (and its SSR gotcha), Tailwind v4 + Framer Motion usage, SEO/metadata/OG, the download flow (OS detection + `/api/latest-release` + per-OS buttons), the shared-release-feed pipeline, Vercel config, and a privacy-preserving analytics/consent banner. It does **not** own installer signing/publishing ([DevOps](60-devops-infrastructure.md)), the design tokens themselves ([Design system](12-design-system.md)), pricing entitlements logic ([Subscriptions](50-subscriptions-entitlements.md)), or auth flows ([Authentication](40-authentication.md)).
 
@@ -519,7 +519,7 @@ export function buildMetadata(p: { title: string; description: string; path: str
     title: p.title,
     description: p.description,
     alternates: { canonical: url },
-    openGraph: { title: p.title, description: p.description, url, siteName: "Cue",
+    openGraph: { title: p.title, description: p.description, url, siteName: "AssistMe",
       images: [{ url: p.image ?? `${SITE}/opengraph-image` }], type: "website" },
     twitter: { card: "summary_large_image", title: p.title, description: p.description },
   };

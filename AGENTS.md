@@ -1,10 +1,10 @@
-# AGENTS.md — Start Here (Cue)
+# AGENTS.md — Start Here (AssistMe)
 
 > For future AI: this is the **first file to read** before doing anything in this repo. It orients you fast, points you at the deeper as-built docs, and states the non-negotiable rules. It documents **what was actually built** (read from source + git), not the aspirational plan.
 
-## What Cue is (in 3 lines)
+## What AssistMe is (in 3 lines)
 
-- **Cue** is a cross-platform (macOS + Windows) real-time **AI meeting/interview copilot**: a private, always-on-top, transparent overlay that is **excluded from screen capture/share** via OS content-protection APIs.
+- **AssistMe** is a cross-platform (macOS + Windows) real-time **AI meeting/interview copilot**: a private, always-on-top, transparent overlay that is **excluded from screen capture/share** via OS content-protection APIs.
 - It captures mic (and, as a stub, system loopback) audio → **Deepgram** streaming STT → **Claude `claude-haiku-4-5`** streaming cues → the overlay, grounded by **RAG** over the user's own documents (Voyage `voyage-3.5`@1024 + pgvector).
 - Built as a **pnpm + Turborepo monorepo** (TypeScript strict, Node 22, scope `@cue/*`) across **5 phases (0–4)**, all merged to the **`dev`** branch.
 
@@ -20,7 +20,7 @@ When the code and the plan disagree, **the code wins** and [`ai-context/04-plan-
 ## Where to start reading (as-built)
 
 1. [`ai-context/README.md`](ai-context/README.md) — index + suggested reading order.
-2. [`ai-context/00-overview.md`](ai-context/00-overview.md) — what Cue is, current state, product surfaces.
+2. [`ai-context/00-overview.md`](ai-context/00-overview.md) — what AssistMe is, current state, product surfaces.
 3. [`ai-context/01-architecture-as-built.md`](ai-context/01-architecture-as-built.md) — the real runtime shape and data flow.
 4. [`ai-context/02-monorepo-map.md`](ai-context/02-monorepo-map.md) — the 12 workspaces and how they depend on each other.
 5. [`ai-context/07-todos-and-gaps.md`](ai-context/07-todos-and-gaps.md) — what is stub/TODO before you trust anything.

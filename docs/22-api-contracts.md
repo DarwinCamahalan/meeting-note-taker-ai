@@ -2,7 +2,7 @@
 
 > Status: Draft · Owner: Principal Architect (Backend / API) · Last updated: 2026-07-29 · Related: [Backend services](20-backend-services.md) · [System architecture](02-system-architecture.md) · [Repository structure](03-repository-structure.md) · [Data model](30-data-model.md) · [Authentication](40-authentication.md) · [Subscriptions & entitlements](50-subscriptions-entitlements.md) · [Decision record](04-decision-record.md) · [Remediation plan](05-remediation-plan.md)
 
-This is the **authoritative wire-contract specification** for Cue. It deepens [Backend services](20-backend-services.md) §3/§6/§8/§10 into a callable spec: the `services/api` REST surface (grouped by resource, with concrete request/response JSON and a single error taxonomy), the `ws-gateway` WebSocket protocol (`cue.v1`), the `ws-gateway ↔ ai-orchestrator` gRPC bidi contract, the code-generated `packages/types` DTO contract, and the cross-cutting versioning / idempotency / pagination conventions every surface inherits.
+This is the **authoritative wire-contract specification** for AssistMe. It deepens [Backend services](20-backend-services.md) §3/§6/§8/§10 into a callable spec: the `services/api` REST surface (grouped by resource, with concrete request/response JSON and a single error taxonomy), the `ws-gateway` WebSocket protocol (`cue.v1`), the `ws-gateway ↔ ai-orchestrator` gRPC bidi contract, the code-generated `packages/types` DTO contract, and the cross-cutting versioning / idempotency / pagination conventions every surface inherits.
 
 It does **not** re-derive service topology ([Backend services](20-backend-services.md)), the token/PKCE model ([Authentication](40-authentication.md)), the SQL schema ([Data model](30-data-model.md)), or the entitlement resolution algorithm ([Entitlements](50-subscriptions-entitlements.md)) — those are the source of truth and are linked, not duplicated.
 
@@ -47,7 +47,7 @@ All paths are `/v1/*`. `A` = auth required, `I` = accepts `Idempotency-Key`, `S`
 
 | Resource | Method & path | Flags | Purpose |
 |---|---|---|---|
-| **auth** | `POST /auth/token` | I | PKCE code → Cue tokens ([Auth §3.2](40-authentication.md)) |
+| **auth** | `POST /auth/token` | I | PKCE code → AssistMe tokens ([Auth §3.2](40-authentication.md)) |
 | | `POST /auth/refresh` | I | rotate refresh + mint access (DPoP proof) |
 | | `POST /auth/step-up` | A | re-mint token after TOTP |
 | | `POST /auth/logout` · `POST /auth/logout-all` | A | revoke session(s) |

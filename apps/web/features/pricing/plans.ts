@@ -12,7 +12,7 @@ export const PRICING_TIERS: readonly PricingTier[] = [
     monthly: 0,
     annual: 0,
     perSeat: false,
-    tagline: 'Try Cue on real calls.',
+    tagline: 'Try AssistMe on real calls.',
     features: [
       '60 live minutes / month',
       'Haiku live cues (claude-haiku-4-5)',

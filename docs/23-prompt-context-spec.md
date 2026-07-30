@@ -267,7 +267,7 @@ export const MODEL_KNOBS: Record<CueType, {
 This is the frozen system block for the live path. It is deliberately terse (every token is billed on the first cold cue) and is the anti-hallucination contract (§6).
 
 ```text
-You are Cue, a private real-time copilot visible ONLY to the user — never to any
+You are AssistMe, a private real-time copilot visible ONLY to the user — never to any
 other party in the conversation. You help the user's NEXT sentence.
 
 OUTPUT CONTRACT
@@ -359,7 +359,7 @@ The `disclosed` flag ([Data model §3.3](30-data-model.md), `sessions.disclosed`
 
 ## 6. Grounding & anti-hallucination
 
-Grounding is Cue's **primary** guardrail — a wrong number in an interview is worse than no cue ([AI pipeline §11](21-ai-pipeline.md)). Three mechanisms compound:
+Grounding is AssistMe's **primary** guardrail — a wrong number in an interview is worse than no cue ([AI pipeline §11](21-ai-pipeline.md)). Three mechanisms compound:
 
 1. **Prompt-level (the contract, §5.2):** the system prompt forbids ungrounded specifics and demarcates trusted KNOWLEDGE/PROFILE from untrusted LIVE TRANSCRIPT. `[source_span]` tags let the model — and an audit view — attribute each grounded fact.
 2. **Assembly-level (structure):** trusted context and live speech are in **separate, labelled blocks** so the model treats retrieved chunks as ground truth and transcript as speech-to-react-to, never as instructions. This is also the [AI pipeline §11](21-ai-pipeline.md) injection defense: the orchestrator executes no tool calls derived from transcript content on the live path.

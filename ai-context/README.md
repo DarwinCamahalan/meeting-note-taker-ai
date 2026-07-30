@@ -1,6 +1,6 @@
 # ai-context — As-Built Documentation for Future AI
 
-> For future AI: this directory documents **what Cue actually is on disk**, read from real source and git history — distinct from [`../docs/`](../docs/), which is the intended **design plan**. Every file here has been written to be accurate over complete: where the code is a stub or TODO, it says so plainly. When source and this doc disagree, **re-read the source** — it moves faster than prose.
+> For future AI: this directory documents **what AssistMe actually is on disk**, read from real source and git history — distinct from [`../docs/`](../docs/), which is the intended **design plan**. Every file here has been written to be accurate over complete: where the code is a stub or TODO, it says so plainly. When source and this doc disagree, **re-read the source** — it moves faster than prose.
 
 Entry point for the whole repo is [`../AGENTS.md`](../AGENTS.md). This README indexes the as-built set.
 
@@ -8,7 +8,7 @@ Entry point for the whole repo is [`../AGENTS.md`](../AGENTS.md). This README in
 
 | File | What it covers |
 |------|----------------|
-| [`00-overview.md`](00-overview.md) | What Cue is, the current state (5 phases on `dev`), product surfaces, and the high-level shape. |
+| [`00-overview.md`](00-overview.md) | What AssistMe is, the current state (5 phases on `dev`), product surfaces, and the high-level shape. |
 | [`01-architecture-as-built.md`](01-architecture-as-built.md) | The real runtime architecture: the audio→cue hot path, transport hops, RAG injection, and how the services actually wire together. |
 | [`02-monorepo-map.md`](02-monorepo-map.md) | The 12 workspaces, their `@cue/*` names, dependency edges, and the layering rules the code obeys. |
 | [`reference/packages.md`](reference/packages.md) | Per-package reference: `config`, `types`, `core`, `db`, `proto`, `sdk`, `observability` — exports, key symbols, real vs stubbed. |

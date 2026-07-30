@@ -1,16 +1,16 @@
-# Cue — Product Vision
+# AssistMe — Product Vision
 
 > Status: Draft · Owner: Head of Product / Principal Architect · Last updated: 2026-07-29 · Related: [Executive Summary](00-executive-summary.md) · [System Architecture](02-system-architecture.md) · [Desktop App](10-desktop-app.md) · [AI Pipeline](21-ai-pipeline.md) · [Design System](12-design-system.md) · [Authentication & Consent](40-authentication.md) · [Subscriptions & Entitlements](50-subscriptions-entitlements.md)
 
-> **Cue** is a provisional working title.
+> **AssistMe** (formerly Cue) is a provisional working title.
 
 ---
 
 ## 1. Vision
 
-**Cue makes anyone more capable in the moments that matter — live.** It is a private AI copilot that listens to your conversation and quietly puts the right words, facts, and reminders in front of *you* — never the other party — with sub-second latency, grounded in what you actually know and care about.
+**AssistMe makes anyone more capable in the moments that matter — live.** It is a private AI copilot that listens to your conversation and quietly puts the right words, facts, and reminders in front of *you* — never the other party — with sub-second latency, grounded in what you actually know and care about.
 
-Where the AI-note-taker category tells you what happened *after* a call, Cue helps you *during* it. Its guiding principle: **augment the person, don't replace them.** Cue is a teleprompter and a confidence rail, not a puppeteer. The product is designed, marketed, and governed around legitimate use — preparation, confidence, copiloting, note-taking, and accessibility — and explicitly *not* around deceiving another party.
+Where the AI-note-taker category tells you what happened *after* a call, AssistMe helps you *during* it. Its guiding principle: **augment the person, don't replace them.** AssistMe is a teleprompter and a confidence rail, not a puppeteer. The product is designed, marketed, and governed around legitimate use — preparation, confidence, copiloting, note-taking, and accessibility — and explicitly *not* around deceiving another party.
 
 ---
 
@@ -21,29 +21,29 @@ Where the AI-note-taker category tells you what happened *after* a call, Cue hel
 - **Context:** Mid-career software engineer, actively interviewing, 3–4 video interviews/week. Non-native English speaker; strong skills but freezes on behavioral questions.
 - **Goals:** Prepare thoroughly; recall her own STAR stories under pressure; stop blanking on "tell me about a time…"; sound articulate and calm.
 - **Frustrations:** Generic prep guides don't reflect *her* resume or the specific JD; live nerves erase preparation.
-- **How Cue helps:** Pre-interview **deep-prep** (Opus) generates likely questions from the JD + her resume; during the call, Haiku surfaces concise reminder cues ("You mentioned the migration project — quantify the impact: 40% latency drop") drawn from her uploaded stories. Post-call summary + self-review.
-- **Responsible-use note:** Cue frames this as preparation and confidence support, and encourages disclosed mode where appropriate. It is a rail, not a script.
+- **How AssistMe helps:** Pre-interview **deep-prep** (Opus) generates likely questions from the JD + her resume; during the call, Haiku surfaces concise reminder cues ("You mentioned the migration project — quantify the impact: 40% latency drop") drawn from her uploaded stories. Post-call summary + self-review.
+- **Responsible-use note:** AssistMe frames this as preparation and confidence support, and encourages disclosed mode where appropriate. It is a rail, not a script.
 
 ### 2.2 Marcus — the Sales Rep
 
 - **Context:** AE running 6–8 discovery/demo calls a day on Zoom and Meet.
 - **Goals:** Never miss a buying signal; recall pricing, competitor comparisons, and objection-handling on the fly; keep eye contact instead of digging through a wiki.
 - **Frustrations:** Post-call tools (Gong) coach him *after* he lost the deal; alt-tabbing to a doc during a demo is obvious and breaks rapport.
-- **How Cue helps:** RAG over the product knowledge base, battlecards, and pricing; live cues on objection handling and next-best-question; overlay invisible when he screen-shares the demo. Team plan shares the knowledge base across the sales org.
+- **How AssistMe helps:** RAG over the product knowledge base, battlecards, and pricing; live cues on objection handling and next-best-question; overlay invisible when he screen-shares the demo. Team plan shares the knowledge base across the sales org.
 
 ### 2.3 Aisha — the Support Agent
 
 - **Context:** Tier-2 customer-support agent on live video/voice with enterprise customers.
 - **Goals:** Resolve faster; surface the right KB article without dead air; stay consistent with policy.
 - **Frustrations:** Searching the KB mid-call creates awkward silences; new agents don't yet know the product deeply.
-- **How Cue helps:** Live transcript + RAG over the support KB surfaces the relevant procedure the instant the customer describes a symptom; suggested phrasing keeps tone consistent. Team knowledge base keeps the whole queue aligned.
+- **How AssistMe helps:** Live transcript + RAG over the support KB surfaces the relevant procedure the instant the customer describes a symptom; suggested phrasing keeps tone consistent. Team knowledge base keeps the whole queue aligned.
 
 ### 2.4 Sam — the Accessibility User
 
 - **Context:** Knowledge worker with ADHD and social anxiety; also represents non-native speakers and users with hearing difficulty.
 - **Goals:** Follow fast-moving meetings; not lose the thread when attention drifts; have a live captioning + gentle prompting layer; reduce the cognitive load of "what do I say next."
 - **Frustrations:** Meetings move faster than they can process; anxiety spikes when put on the spot; existing captioning is retrospective or clunky.
-- **How Cue helps:** Live transcript as always-on captions; gentle, low-density cues that reduce panic; note-taking so they don't have to split attention. This persona is a **first-class design constraint** — see [Design System](12-design-system.md) for the accessibility-driven overlay UX (low-density, dyslexia-friendly type, adjustable opacity, reduced-motion).
+- **How AssistMe helps:** Live transcript as always-on captions; gentle, low-density cues that reduce panic; note-taking so they don't have to split attention. This persona is a **first-class design constraint** — see [Design System](12-design-system.md) for the accessibility-driven overlay UX (low-density, dyslexia-friendly type, adjustable opacity, reduced-motion).
 
 ---
 
@@ -83,7 +83,7 @@ Prioritization = *value to wedge users × technical readiness × differentiation
 
 Against the *AI meeting/interview copilot* landscape (full table in [Executive Summary §4](00-executive-summary.md)):
 
-| Dimension | Cue | Post-call note-takers | Browser interview tools | Generic LLM app |
+| Dimension | AssistMe | Post-call note-takers | Browser interview tools | Generic LLM app |
 |-----------|-----|----------------------|------------------------|-----------------|
 | **Timing** | Real-time, <1.2s p95 | After the call | Laggy (3–5s) | Manual copy-paste |
 | **Privacy on shared screen** | OS-level capture exclusion + absent from screen-share pickers | N/A (bots join) | Visible on share | Visible |
@@ -92,7 +92,7 @@ Against the *AI meeting/interview copilot* landscape (full table in [Executive S
 | **Model quality/routing** | Claude Haiku→Sonnet→Opus routing + prompt caching | Varies | Varies | Single model |
 | **Note-taking** | Yes (complementary) | Yes (their core) | No | No |
 
-**One-line summary:** Cue is the only copilot that is *fast enough to help mid-sentence, private enough to use on a shared screen, and personal enough to know your material.*
+**One-line summary:** AssistMe is the only copilot that is *fast enough to help mid-sentence, private enough to use on a shared screen, and personal enough to know your material.*
 
 ---
 
@@ -113,10 +113,10 @@ Against the *AI meeting/interview copilot* landscape (full table in [Executive S
 ### Out of scope (v1)
 
 - Mobile (iOS/Android) native apps — *later; see [Roadmap](80-roadmap.md).*
-- Meeting-bot join model (Cue is client-side capture, not a bot in the room).
-- Autonomous "agent" that speaks or acts on the user's behalf — Cue *suggests*, the human *decides*.
+- Meeting-bot join model (AssistMe is client-side capture, not a bot in the room).
+- Autonomous "agent" that speaks or acts on the user's behalf — AssistMe *suggests*, the human *decides*.
 - Real-time voice cloning / avatar / deepfake features — deliberately excluded on ethical grounds.
-- Full CRM/helpdesk replacement — Cue integrates with and complements these.
+- Full CRM/helpdesk replacement — AssistMe integrates with and complements these.
 - Covert-by-design marketing or features that optimize for deceiving another party — **explicitly out of scope as a matter of principle.**
 
 ---
@@ -158,7 +158,7 @@ journey
 
 ## 8. Responsible use
 
-Cue is built for legitimate assistance — interview **preparation** and confidence, sales/support copiloting, note-taking, and **accessibility** — and is deliberately *not* engineered or marketed to deceive another party. Screen-capture exclusion is a standard, legitimate OS capability (used by password managers, banking, and DRM apps) that we treat as a **privacy feature protecting the user's private notes**, not a tool for concealment from a conversation partner. Every deployment ships with an acceptable-use policy, a jurisdiction-aware consent/compliance model (recording-consent laws vary — two-party-consent states, GDPR, and similar regimes), a **disclosed mode** that supports transparency with the other party where appropriate or required, opt-out of model training, and data-retention/deletion controls. The full, authoritative treatment — acceptable-use policy text, consent UX, jurisdiction handling, and disclosed-mode mechanics — lives in the **legal/compliance audit** ([docs/audits/](audits/)) and the consent model in [Authentication & Consent](40-authentication.md); this section is a summary and defers to those documents.
+AssistMe is built for legitimate assistance — interview **preparation** and confidence, sales/support copiloting, note-taking, and **accessibility** — and is deliberately *not* engineered or marketed to deceive another party. Screen-capture exclusion is a standard, legitimate OS capability (used by password managers, banking, and DRM apps) that we treat as a **privacy feature protecting the user's private notes**, not a tool for concealment from a conversation partner. Every deployment ships with an acceptable-use policy, a jurisdiction-aware consent/compliance model (recording-consent laws vary — two-party-consent states, GDPR, and similar regimes), a **disclosed mode** that supports transparency with the other party where appropriate or required, opt-out of model training, and data-retention/deletion controls. The full, authoritative treatment — acceptable-use policy text, consent UX, jurisdiction handling, and disclosed-mode mechanics — lives in the **legal/compliance audit** ([docs/audits/](audits/)) and the consent model in [Authentication & Consent](40-authentication.md); this section is a summary and defers to those documents.
 
 ---
 

@@ -7,7 +7,7 @@ import { buildMetadata } from '@/lib/seo/metadata';
 export const metadata: Metadata = buildMetadata({
   title: 'Pricing',
   description:
-    'Simple plans for Cue: Free to start, Pro at $20/mo, Team at $30/seat, and Enterprise. Live minutes, model access, and RAG uploads per tier.',
+    'Simple plans for AssistMe: Free to start, Pro at $20/mo, Team at $30/seat, and Enterprise. Live minutes, model access, and RAG uploads per tier.',
   path: '/pricing',
 });
 

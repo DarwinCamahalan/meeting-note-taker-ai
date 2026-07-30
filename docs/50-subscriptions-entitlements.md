@@ -1,8 +1,8 @@
-# Cue — Subscriptions & Entitlements
+# AssistMe — Subscriptions & Entitlements
 
 > Status: Draft · Owner: Platform / Billing Architect · Last updated: 2026-07-29 · Related: [Payments (Stripe)](51-payments-stripe.md) · [AI Pipeline](21-ai-pipeline.md) · [Unit Economics](71-unit-economics.md) · [Backend Services](20-backend-services.md) · [Authentication](40-authentication.md) · [Data Model](30-data-model.md) · [Product Vision](01-product-vision.md)
 
-> **Cue** is a provisional working title. All brand references are placeholders.
+> **AssistMe** (formerly Cue) is a provisional working title. All brand references are placeholders.
 
 ---
 
