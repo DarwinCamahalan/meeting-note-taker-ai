@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened Runtime entitlements for the notarized Cue macOS build.
+
+  Kept intentionally MINIMAL (per 60-devops-infrastructure §7.2 / risk §552):
+  ScreenCaptureKit + Core Audio-tap + content-protection APIs are exactly the
+  surface Apple scrutinizes at notarization, so we request only what the app
+  genuinely uses and document each grant.
+
+  This file is referenced by BOTH `mac.entitlements` and
+  `mac.entitlementsInherit` in electron-builder.yml so the helper/renderer
+  child processes inherit the same capabilities.
+
+  NOTE ON "SCREEN RECORDING": macOS has no static entitlement that pre-grants
+  screen recording — it is a TCC permission the user approves at runtime
+  (System Settings ▸ Privacy & Security ▸ Screen Recording), triggered the
+  first time the app captures the display/system audio via ScreenCaptureKit.
+  The rationale string the user sees there is set from Info.plist via
+  electron-builder `extendInfo`. What the hardened runtime DOES need for that
+  capture path is the audio-input device entitlement (below).
+-->
+<plist version="1.0">
+  <dict>
+    <!-- Microphone / audio input: STT capture + system-audio tap. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+
+    <!-- Camera: reserved for future video-call awareness; the usage string in
+         Info.plist gates the TCC prompt. Remove if the feature is dropped. -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
+
+    <!-- Electron/V8 require JIT + writable-executable pages under the hardened
+         runtime. These are the standard, Apple-accepted Electron exceptions. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!--
+      Deliberately NOT set: com.apple.security.cs.disable-library-validation.
+      Per 60-devops-infrastructure §7.2 we keep library validation ON unless a
+      native module forces otherwise; none does today.
+    -->
+  </dict>
+</plist>
