@@ -7,6 +7,7 @@ import { createPipeline, resolveBackend, type CueBackend } from './pipeline-runn
 import { AuthManager } from './auth';
 import { registerIpc } from './ipc';
 import { registerGlobalShortcuts, unregisterAll, type ShortcutActions } from './shortcuts';
+import { startAutoUpdate, stopAutoUpdate } from './updater';
 
 /**
  * Cue main-process COORDINATOR (Phase 0 foundation + Phase 1 backend wiring).
@@ -97,6 +98,18 @@ async function bootstrap(): Promise<void> {
     },
   };
   registerGlobalShortcuts(actions);
+
+  // Signed auto-update: gated behind an INDEPENDENT manifest signature check
+  // (autoDownload=false until verified — see ./updater + ./update-verify).
+  // Disabled during dev (no packaged app / feed) and when the feed is unset.
+  if (app.isPackaged) {
+    startAutoUpdate({
+      ...(process.env['RELEASES_URL'] ? { feedUrl: process.env['RELEASES_URL'] } : {}),
+      ...(process.env['UPDATE_MANIFEST_PUBLIC_KEY']
+        ? { publicKey: process.env['UPDATE_MANIFEST_PUBLIC_KEY'] }
+        : {}),
+    });
+  }
 }
 
 // Single-instance lock: a second launch focuses the existing overlay.
@@ -135,5 +148,6 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   unregisterAll();
+  stopAutoUpdate();
   void pipeline?.stop();
 });
