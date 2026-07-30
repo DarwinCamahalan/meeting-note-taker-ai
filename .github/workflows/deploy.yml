@@ -1,0 +1,237 @@
+# .github/workflows/deploy.yml
+#
+# Backend service delivery for Cue (docs/60-devops-infrastructure.md §6.2).
+#
+#   build+push  -> one immutable image per service to ECR, tagged with the git
+#                  SHA (digest promotion — the same bytes flow dev -> staging ->
+#                  prod, never a rebuild per env). SBOM + SLSA provenance are
+#                  generated per image (release gates §11.1 gates 4-5).
+#   deploy      -> register a new ECS task-def revision and cut over.
+#                    * api / entitlements / billing-webhooks -> blue-green via
+#                      AWS CodeDeploy (instant rollback by shifting traffic back
+#                      to BLUE).
+#                    * ws-gateway -> canary/linear shift (holds long-lived WS
+#                      connections; new tasks take new conns, old tasks drain).
+#                    * ai-orchestrator -> drains in-flight streams (stopTimeout
+#                      120s, SIGTERM -> finish stream -> exit) before cutover.
+#
+# Auth to AWS is GitHub OIDC federation ONLY (ADR-INF-03) — no static AWS keys.
+# The role ARN, region, and ECR registry come from repo/environment vars.
+#
+# Promotion:
+#   push to main         -> dev (auto) -> staging (auto, needs dev green)
+#   workflow_dispatch     -> prod (manual, gated by the `production` GitHub
+#                            Environment's required reviewers).
+
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment for a manual deploy
+        type: choice
+        default: prod
+        options: [dev, staging, prod]
+
+concurrency:
+  # Never let two deploys of the same env race a task-def revision.
+  group: deploy-${{ github.ref }}-${{ github.event.inputs.environment || 'pipeline' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "9.12.3"
+  # ECR repo namespace, e.g. 123456789012.dkr.ecr.us-east-1.amazonaws.com/cue
+  ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build one image per canonical service and push to ECR (immutable :<sha>).
+  # ---------------------------------------------------------------------------
+  build-push:
+    name: build+push ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # AWS OIDC + provenance OIDC
+      attestations: write # SLSA provenance store
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, ws-gateway, ai-orchestrator]
+    outputs:
+      image_tag: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
+          push: true
+          # Immutable SHA tag is the promotion unit; `edge` tracks main HEAD.
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ matrix.service }}:${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/${{ matrix.service }}:edge
+          provenance: true
+          sbom: true
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      # Gate 5 — SLSA-style provenance bound to the pushed image digest.
+      - name: Attest image provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.ECR_REGISTRY }}/${{ matrix.service }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  # ---------------------------------------------------------------------------
+  # Auto path: dev then staging on every push to main.
+  # ---------------------------------------------------------------------------
+  deploy-dev:
+    name: deploy → dev
+    needs: build-push
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      matrix:
+        service: [api, ws-gateway, ai-orchestrator]
+    steps:
+      # Steps are inlined (not a composite) so this workflow is self-contained;
+      # deploy-staging / deploy-prod share identical logic differing only in the
+      # target cluster and cutover strategy.
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Render task definition (new image)
+        id: render
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          # Pulled/committed under infra/ecs/taskdefs/dev/<service>.json (TODO).
+          task-definition: infra/ecs/taskdefs/dev/${{ matrix.service }}.json
+          container-name: ${{ matrix.service }}
+          image: ${{ vars.ECR_REGISTRY }}/${{ matrix.service }}:${{ github.sha }}
+      - name: Deploy to ECS (rolling, dev)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render.outputs.task-definition }}
+          service: ${{ matrix.service }}
+          cluster: cue-dev
+          wait-for-service-stability: true
+
+  deploy-staging:
+    name: deploy → staging
+    needs: deploy-dev
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      matrix:
+        service: [api, ws-gateway, ai-orchestrator]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Render task definition (new image)
+        id: render
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: infra/ecs/taskdefs/staging/${{ matrix.service }}.json
+          container-name: ${{ matrix.service }}
+          image: ${{ vars.ECR_REGISTRY }}/${{ matrix.service }}:${{ github.sha }}
+      # Blue-green via CodeDeploy for api; ws-gateway/ai-orchestrator drain via
+      # their long stopTimeout (see task-def) so a linear/rolling shift never
+      # kills a live meeting mid-stream.
+      - name: Deploy to ECS (blue-green, staging)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render.outputs.task-definition }}
+          service: ${{ matrix.service }}
+          cluster: cue-staging
+          wait-for-service-stability: true
+          codedeploy-appspec: infra/ecs/appspec/${{ matrix.service }}.yaml
+          codedeploy-application: cue-staging-${{ matrix.service }}
+          codedeploy-deployment-group: cue-staging-${{ matrix.service }}-dg
+
+  # ---------------------------------------------------------------------------
+  # Manual, human-approved prod cutover. Same digest promoted from staging.
+  # eu-west-1 follows us-east-1 after health is green (warm-standby topology,
+  # §9.2) — the second region is a repeat of this job with AWS_REGION overridden
+  # (see infra/README for the region toggle). Left as a documented TODO here.
+  # ---------------------------------------------------------------------------
+  deploy-prod:
+    name: deploy → prod (approval)
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod'
+    runs-on: ubuntu-latest
+    environment: production # required reviewers gate this environment
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      # Deploy latency-critical services one at a time so a bad canary halts the
+      # rest instead of shifting every service at once.
+      max-parallel: 1
+      matrix:
+        service: [api, ws-gateway, ai-orchestrator]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Render task definition (promoted digest)
+        id: render
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: infra/ecs/taskdefs/prod/${{ matrix.service }}.json
+          container-name: ${{ matrix.service }}
+          image: ${{ vars.ECR_REGISTRY }}/${{ matrix.service }}:${{ github.sha }}
+      - name: Deploy to ECS (blue-green, prod)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render.outputs.task-definition }}
+          service: ${{ matrix.service }}
+          cluster: cue-prod
+          wait-for-service-stability: true
+          # CodeDeploy auto-rollback on a CloudWatch alarm breach (p99 latency,
+          # 5xx rate, health-check failures) during the bake window (§6.2).
+          codedeploy-appspec: infra/ecs/appspec/${{ matrix.service }}.yaml
+          codedeploy-application: cue-prod-${{ matrix.service }}
+          codedeploy-deployment-group: cue-prod-${{ matrix.service }}-dg

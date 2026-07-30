@@ -57,6 +57,8 @@ export class DeepgramSttClient {
 
   private connection: ListenLiveClient | undefined;
   private transcriptCb: ((t: TranscriptEvent) => void) | undefined;
+  private errorCb: ((err: unknown) => void) | undefined;
+  private closeCb: (() => void) | undefined;
 
   /** PCM buffered while the socket is still opening. */
   private readonly pending: ArrayBuffer[] = [];
@@ -85,11 +87,15 @@ export class DeepgramSttClient {
 
     connection.on(LiveTranscriptionEvents.Close, () => {
       this.isOpen = false;
+      this.closeCb?.();
     });
 
     connection.on(LiveTranscriptionEvents.Error, (err: unknown) => {
       this.isOpen = false;
-      console.error('[cue][deepgram] live error:', err);
+      // Surface to the reliability layer (reconnect/failover). Kept quiet on the
+      // console when a handler is registered so the resilient wrapper owns logging.
+      if (this.errorCb) this.errorCb(err);
+      else console.error('[cue][deepgram] live error:', err);
     });
   }
 
@@ -128,6 +134,20 @@ export class DeepgramSttClient {
   /** Register the transcript sink (last-writer-wins). */
   onTranscript(cb: (t: TranscriptEvent) => void): void {
     this.transcriptCb = cb;
+  }
+
+  /**
+   * Register a sink for live-socket errors (last-writer-wins). The reliability
+   * layer uses this to drive bounded reconnect / provider failover. Registering
+   * a handler suppresses the default console error.
+   */
+  onError(cb: (err: unknown) => void): void {
+    this.errorCb = cb;
+  }
+
+  /** Register a sink for socket close (last-writer-wins). */
+  onClose(cb: () => void): void {
+    this.closeCb = cb;
   }
 
   private flushPending(): void {

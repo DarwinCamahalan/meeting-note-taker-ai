@@ -32,12 +32,30 @@ export interface RagConfig {
   budgetMs?: number;
 }
 
+/**
+ * Reliability tuning for the live-cue path (docs/70-scalability §5). Entirely
+ * opt-out: when absent the resilient STT/LLM wrappers are on with their spec
+ * defaults (circuit breakers + graceful degradation, never retry the live cue).
+ * The healthy path is byte-identical to Phase 0.
+ */
+export interface ReliabilityConfig {
+  /** Master switch for the resilience wrappers. Default `true`. */
+  enabled?: boolean;
+  /**
+   * Observed Claude time-to-first-token (ms) above which the ladder steps to
+   * `reduced` (shorter cues, throttle). Default 900 (server-latency SLO).
+   */
+  slowTtftMs?: number;
+}
+
 /** Credentials required to construct the pipeline. Read from env in main. */
 export interface OrchestratorConfig {
   anthropicApiKey: string;
   deepgramApiKey: string;
   /** Optional RAG grounding; omit for the local/no-RAG path. */
   rag?: RagConfig;
+  /** Optional reliability tuning; omit for the resilient defaults. */
+  reliability?: ReliabilityConfig;
 }
 
 /**

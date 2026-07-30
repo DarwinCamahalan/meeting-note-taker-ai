@@ -17,13 +17,18 @@ import {
   type RawBodyRequest,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { SkipRateLimit } from '../rate-limit/rate-limit.decorator.js';
 import { BillingWebhooksService } from './billing-webhooks.service.js';
 
 interface WebhookAck {
   received: boolean;
 }
 
+// Stripe drives its own retry/backoff and the request is HMAC-verified; a
+// user-keyed limiter would be meaningless here (no user) and could drop
+// legitimate provider retries.
 @Controller('v1/billing')
+@SkipRateLimit()
 export class BillingWebhooksController {
   constructor(private readonly webhooks: BillingWebhooksService) {}
 

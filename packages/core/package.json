@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
+    "@cue/observability": "workspace:*",
     "@cue/types": "workspace:*",
     "@deepgram/sdk": "^3.9.0"
   },

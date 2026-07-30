@@ -401,3 +401,142 @@ enums; `invitations.role` reuses `orgRoleEnum`, admin events reuse the existing
 `audit_logs` table). `0002_team_kb` adds the shared-KB `visibility` column.
 
 See [`services/README.md`](services/README.md) for the full Phase 3 endpoint map.
+
+## Getting started — Phase 4 (Scale & Ops)
+
+Phase 4 makes Cue operable at scale without changing any Phase 0–3 behaviour.
+It adds **observability** (`@cue/observability`), **Terraform IaC** (`infra/`),
+**GitHub Actions CI/CD** (`.github/workflows/`), and **reliability/scale**
+plumbing (circuit breakers, graceful degradation, Redis rate limiting, WS
+connection caps + backpressure, SIGTERM drain, per-region admission control).
+Everything is additive and env-gated: with the new vars unset, services behave
+exactly as in Phase 3 (tracing/Sentry/PostHog become no-ops, the rate limiter
+fails open, admission gates are disabled).
+
+### Observability endpoints
+
+`@cue/observability` (OpenTelemetry traces + pino structured logs + prom-client
+metrics + Sentry errors) is wired into all three services. Transcripts and PII
+are **never** logged — pino redaction (`PII_DENYLIST`) and a Sentry `beforeSend`
+scrubber strip bodies, cookies, query strings, credential headers, and
+denylisted keys before anything leaves the process.
+
+| Endpoint | `@cue/api` (`:3001`) | `@cue/ws-gateway` / `@cue/ai-orchestrator` (`METRICS_PORT`, default `:9464`) |
+| --- | --- | --- |
+| `GET /metrics` | Prometheus text (served by `ObservabilityModule` on `API_PORT`) | Prometheus text (standalone http server) |
+| `GET /livez` | liveness probe | liveness probe |
+| `GET /readyz` | readiness probe (flips to `down` on SIGTERM drain) | readiness probe (drains on SIGTERM) |
+| `GET /healthz` | existing Phase 1 check (unchanged) | — |
+
+The non-Nest services (`ws-gateway`, `ai-orchestrator`) run a tiny standalone
+HTTP listener on `METRICS_PORT` for scrape + ALB probes; the Nest `api` serves
+all four on its own port. Canonical SLIs on the shared registry: Cue
+server-latency p50/95/99 (`cueServerLatencyMs`), STT partial lag, LLM TTFT,
+WS active connections, and minutes consumed (labelled by tier only — no
+per-user cardinality).
+
+```bash
+curl http://localhost:3001/metrics    # api
+curl http://localhost:9464/readyz      # ws-gateway / ai-orchestrator
+```
+
+### New environment variables
+
+All still live in the repo-root `.env` (copy from `.env.example`). Phase 4 adds:
+
+| Var | Used by | Notes |
+| --- | --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | all services | OTLP/HTTP traces collector (base `http://host:4318` or a full `/v1/traces` URL). Unset ⇒ exports to the OTel default. `OTEL_SDK_DISABLED=true` turns tracing off entirely. |
+| `SENTRY_DSN` / `SENTRY_RELEASE` | all services (server) | Unset ⇒ `initSentry()` is a silent no-op. |
+| `METRICS_PORT` | `ws-gateway`, `ai-orchestrator` | Standalone `/metrics` `/readyz` `/livez` port (default `9464`). `api` serves these on `API_PORT`. |
+| `LOG_LEVEL` | all services | pino level (`trace…fatal`), default `info`. |
+| `AWS_REGION` | all services | Region tag stamped on logs/metrics; also selects the regional admission budget. |
+| `POSTHOG_KEY` / `POSTHOG_HOST` | server analytics (`posthog-node`) | Typed non-PII event allowlist; autocapture off. |
+| `NEXT_PUBLIC_SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_ENV` | `apps/web` (`@sentry/nextjs`) | Browser Sentry; unset ⇒ no-op. `SENTRY_ORG`/`SENTRY_PROJECT`/`SENTRY_AUTH_TOKEN` are optional source-map upload creds. |
+| `NEXT_PUBLIC_POSTHOG_KEY` / `NEXT_PUBLIC_POSTHOG_HOST` | `apps/web` (`posthog-js`) | Browser analytics; autocapture/session-recording off, text masked, IP not stored. |
+| `REDIS_URL` | `api`, `ws-gateway` | Control-Redis for rate-limit counters + admission budgets. Unset ⇒ rate limiter **fails open** (dev). |
+| `RATE_LIMIT_WINDOW` / `RATE_LIMIT_MAX` | `api` | Per-user (IP fallback) sliding window; over-limit ⇒ `429 RATE_LIMITED`. Defaults `60`s / `120`. |
+| `WS_MAX_CONNECTIONS` | `ws-gateway` | Hard per-task concurrent-socket ceiling; over-cap sockets rejected `1013`; autoscaling targets ~60%. `0` = off. |
+| `SHUTDOWN_DRAIN_MS` | `ws-gateway` | Max wall-clock to drain in-flight sockets on SIGTERM before force-close (default `30000`). |
+| `CLAUDE_RPM_LIMIT` / `STT_CONCURRENCY` | `ai-orchestrator` | **Per-region** admission budget (never a shared global pool). Effective session ceiling = `min(STT_CONCURRENCY, CLAUDE_RPM_LIMIT / 4)`. `0` = gate disabled (dev). |
+
+### Reliability & degradation (how it behaves under stress)
+
+- **Circuit breakers** (`@cue/observability/reliability`) wrap every provider
+  call (Deepgram STT, Claude LLM); `closed → open → half-open`. On the **live-cue
+  hot path** the breaker is used but `retry()` is **not** (retries would blow the
+  two-budget latency SLO — server-controllable `<~900ms` from endpointing, full
+  `<1.2s` p95). Internal idempotent calls may `retry()` with full-jitter backoff.
+- **Graceful degradation ladder** (`@cue/core/reliability`): when a provider is
+  degraded the session sheds work in order rather than hard-failing — see
+  `docs/70-scalability.md §5.2`.
+- **Rate limiting** — the `api` Redis guard enforces `RATE_LIMIT_*` per user;
+  `ws-gateway` enforces `WS_MAX_CONNECTIONS` + egress/ingress backpressure
+  watermarks (`{t:'backpressure', level:'shed'|'ok'}`).
+- **Regional admission control** — `ai-orchestrator` meters new sessions against
+  `CLAUDE_RPM_LIMIT` / `STT_CONCURRENCY` for **its** region only.
+- **Graceful shutdown** — all services drain on `SIGTERM` (readiness flips to
+  `down` so the ALB stops routing, in-flight work finishes within the drain
+  bound) before exit.
+
+### Infrastructure (Terraform — `infra/`)
+
+AWS ECS Fargate + ALB, Aurora Serverless v2 (Postgres 16 + pgvector),
+ElastiCache Redis, CloudFront + Route53 + ACM, Secrets Manager, and S3/R2, as a
+single root stack selected per environment (`dev`/`staging`/`prod`) with
+`-var-file`, symmetrically instantiated per region (`us-east-1` primary,
+`eu-west-1` secondary, toggled by `enable_secondary_region`). **No secrets,
+account ids, or state backends are hardcoded** — the S3+DynamoDB backend is
+supplied at `init` via `-backend-config`, the Redis AUTH token via
+`TF_VAR_redis_auth_token`, and Secrets Manager values are written out-of-band.
+
+```bash
+cd infra
+terraform init \
+  -backend-config="bucket=cue-tfstate-prod" \
+  -backend-config="key=prod/us-east-1/terraform.tfstate" \
+  -backend-config="region=us-east-1" \
+  -backend-config="dynamodb_table=cue-tflock" -backend-config="encrypt=true"
+export TF_VAR_redis_auth_token="$(openssl rand -base64 32 | tr -d '/+=' | cut -c1-40)"
+terraform plan  -var-file=envs/prod.tfvars -out=plan.bin
+terraform apply plan.bin
+# after first apply, populate Secrets Manager values by ARN, per region
+```
+
+See [`infra/README.md`](infra/README.md) for the one-time state-backend
+bootstrap, the full apply order, the two-region residency model, per-module
+detail, and the known skeleton caveats to wire before a first prod apply.
+
+### CI/CD (`.github/workflows/`)
+
+All three workflows authenticate to AWS via **OIDC** (no static creds).
+
+| Workflow | Trigger | What it does |
+| --- | --- | --- |
+| `ci.yml` | PR | `pnpm install --frozen-lockfile`; Turbo `typecheck`/`lint`/`test`/`build`; supply-chain **gates**: `pnpm audit` (fail on high/critical), gitleaks secret scan, CycloneDX SBOM + a build-provenance attestation. |
+| `deploy.yml` | merge / dispatch | Build + push one image per service to ECR (digest promotion by git SHA), ECS deploy per env (blue-green via the deployment circuit breaker + rollback), `production` Environment approval gate for prod. |
+| `release-desktop.yml` | tag | electron-builder macOS notarize + Windows sign, publish artifacts, **independently minisign-sign** the update manifest out-of-band, and gate on the update tamper-rejection tests. |
+
+**Required GitHub secrets / vars** (set in repo/Environment settings, never in
+files):
+
+- AWS: `secrets.AWS_DEPLOY_ROLE_ARN` (OIDC role), `vars.AWS_REGION`,
+  `vars.ECR_REGISTRY`.
+- Turbo remote cache (optional): `secrets.TURBO_TOKEN`, `vars.TURBO_TEAM`.
+- Secret scan: `secrets.GITLEAKS_LICENSE` (org license, optional).
+- macOS signing/notarize: `secrets.APPLE_DEVELOPER_ID_P12`,
+  `secrets.APPLE_CERT_PASSWORD`, `secrets.APPLE_ID`,
+  `secrets.APPLE_APP_SPECIFIC_PASSWORD`, `secrets.APPLE_TEAM_ID`.
+- Windows signing: `secrets.WIN_CSC_LINK`, `secrets.WIN_CSC_KEY_PASSWORD`.
+- Update-manifest signing: `secrets.MINISIGN_SECRET_KEY`,
+  `secrets.MINISIGN_KEY_PASSWORD`, `vars.MINISIGN_PUBLIC_KEY` (must match the
+  desktop-pinned `UPDATE_MANIFEST_PUBLIC_KEY`).
+- Release artifact store (R2): `secrets.R2_ENDPOINT`, `secrets.R2_BUCKET`,
+  `secrets.R2_ACCESS_KEY_ID`, `secrets.R2_SECRET_ACCESS_KEY`.
+
+The minisign signing key lives **only** in CI, never alongside the R2/S3
+artifact-host credentials — the manifest signature is the independent trust
+anchor the desktop updater verifies before `electron-updater` runs.
+
+See [`services/README.md`](services/README.md) for the per-service `/metrics` +
+health surface and the container images.

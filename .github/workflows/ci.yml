@@ -1,0 +1,187 @@
+# .github/workflows/ci.yml
+#
+# Pull-request CI for the Cue monorepo. Runs the standard build/verify graph
+# (Turborepo) plus the software supply-chain gates defined in
+# docs/60-devops-infrastructure.md §11 and docs/05-remediation-plan.md.
+#
+# PR merge gates (§11.1 gates 1-3): frozen lockfile, dependency-advisory scan,
+# secret scan. Plus, per Phase-4 task scope: CycloneDX SBOM generation and a
+# SLSA-style build-provenance attestation of that SBOM. (Container/binary SBOM +
+# provenance for the shipped artifacts themselves are re-generated at release
+# time in deploy.yml / release-desktop.yml, which is the canonical §11 slot for
+# gates 4-5 — see those files.)
+#
+# No cloud credentials are used here: this workflow only reads the repo, so it
+# needs no AWS OIDC. Provenance attestation uses the built-in GITHUB_TOKEN OIDC.
+
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  # Allow re-running the full gate set on the protected branch itself.
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege. Individual jobs widen only what they need.
+permissions:
+  contents: read
+
+env:
+  # Single source of truth for the toolchain; keep in sync with package.json
+  # engines (>=22) and packageManager (pnpm@9.12.3) and .nvmrc (22).
+  NODE_VERSION: "22"
+  PNPM_VERSION: "9.12.3"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build & verify — the Turborepo task graph. Gate 1 (frozen lockfile) is the
+  # install step here and in every other install across the pipeline.
+  # ---------------------------------------------------------------------------
+  verify:
+    name: typecheck · lint · test · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      # Gate 1 — frozen lockfile. Fails if pnpm-lock.yaml would change.
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      # Remote Turbo caching is optional; when TURBO_TOKEN/TEAM are absent turbo
+      # falls back to local cache transparently.
+      - name: Turbo typecheck · lint · test · build
+        run: pnpm turbo run typecheck lint test build
+        env:
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+
+  # ---------------------------------------------------------------------------
+  # Gate 2 — dependency-advisory scan. Fails on high/critical. A documented,
+  # expiring waiver is the escape hatch (§11.1) via pnpm's audit config.
+  # ---------------------------------------------------------------------------
+  dependency-audit:
+    name: dependency-advisory scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      # pnpm audit against the advisory DB. --audit-level high => exit non-zero
+      # (fail the gate) only on high/critical, per §11.1 fail action.
+      - name: pnpm audit (fail on high/critical)
+        run: pnpm audit --audit-level high --prod
+
+      # OSV scanner is the second, source-of-truth advisory pass (GHSA/OSV) so a
+      # gap in one DB is covered by the other. Scans the committed lockfile.
+      - name: OSV scanner
+        uses: google/osv-scanner-action@v1
+        with:
+          scan-args: |-
+            --lockfile=pnpm-lock.yaml
+            --recursive
+            .
+
+  # ---------------------------------------------------------------------------
+  # Gate 3 — secret scan. gitleaks on the PR diff (full-history nightly scan is
+  # a separate scheduled workflow, out of PR scope). Fails on any finding.
+  # ---------------------------------------------------------------------------
+  secret-scan:
+    name: gitleaks secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks needs history to diff the PR range.
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITLEAKS_LICENSE is only required for gitleaks-action on orgs; it is
+          # read from secrets when present and ignored otherwise.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  # ---------------------------------------------------------------------------
+  # Gate 4 (SBOM) + Gate 5 (provenance) for the source tree. CycloneDX SBOM of
+  # the whole pnpm workspace, then a SLSA-style build-provenance attestation
+  # binding the SBOM digest -> commit -> builder identity via GitHub OIDC.
+  # ---------------------------------------------------------------------------
+  sbom-provenance:
+    name: CycloneDX SBOM · SLSA provenance
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required by actions/attest-build-provenance to mint the OIDC token and
+      # write the attestation to the attestations store.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      # @cyclonedx/cyclonedx-npm reads the installed workspace and emits a
+      # standards CycloneDX JSON SBOM. The release fails if it cannot generate.
+      - name: Generate CycloneDX SBOM
+        run: >-
+          pnpm dlx @cyclonedx/cyclonedx-npm@^1
+          --output-format JSON
+          --output-file sbom.cyclonedx.json
+          --package-lock-only
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cyclonedx.json
+          if-no-files-found: error
+
+      # SLSA-style provenance: attest the SBOM file so consumers can verify it
+      # was produced by this repo's CI at this commit (gate 5).
+      - name: Attest SBOM provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: sbom.cyclonedx.json

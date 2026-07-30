@@ -1,0 +1,60 @@
+{
+  "name": "@cue/observability",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cue observability + reliability foundation: OpenTelemetry tracing, pino structured logging (PII-redacted, trace-bound), Prometheus SLIs, Sentry, health probes, a NestJS module (/metrics /readyz /livez + interceptors), and provider circuit-breaker/backoff utilities.",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./nest": {
+      "types": "./dist/nest/index.d.ts",
+      "default": "./dist/nest/index.js"
+    },
+    "./reliability": {
+      "types": "./dist/reliability/index.d.ts",
+      "default": "./dist/reliability/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.52.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.55.0",
+    "@opentelemetry/sdk-node": "^0.55.0",
+    "@sentry/node": "^8.0.0",
+    "pino": "^9.0.0",
+    "prom-client": "^15.0.0"
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "peerDependenciesMeta": {
+    "@nestjs/common": { "optional": true },
+    "@nestjs/core": { "optional": true },
+    "reflect-metadata": { "optional": true },
+    "rxjs": { "optional": true }
+  },
+  "devDependencies": {
+    "@cue/config": "workspace:*",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@types/node": "^22.9.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,4 +1,4 @@
-# Cue backend services (Phase 1)
+# Cue backend services
 
 Three services sit behind the desktop app. The per-frame audio hot path is
 **gRPC bidi** between `ws-gateway` and `ai-orchestrator` (Redis is kept off it);
@@ -149,6 +149,64 @@ Retrieval (`PgVectorSearchService` in `@cue/api`, the `rag/` port in
 `visibility = 'org' OR user_id = :userId` **before** the cosine ANN scan, so
 every member retrieves the shared KB plus their own personal docs. `POST
 /v1/documents` accepts an optional `visibility` (`org` default | `personal`).
+
+## Phase 4 surface (observability, reliability, containers)
+
+Phase 4 is additive across **all three** services (plus `@cue/api` gains a Redis
+rate-limit guard). It never changes the request path above — it adds a scrape +
+probe surface, reliability plumbing, and container images.
+
+### Observability endpoints (per service)
+
+All services embed `@cue/observability` (OTel traces + pino logs + prom-client
+metrics + Sentry). Transcripts/PII are never logged (pino `PII_DENYLIST`
+redaction + Sentry `beforeSend` scrubbing).
+
+| Service | Metrics/probe surface | Port |
+| --- | --- | --- |
+| `@cue/api` | `GET /metrics` `/livez` `/readyz` via `ObservabilityModule` (+ the existing `/healthz`) | on `API_PORT` (`:3001`) |
+| `@cue/ws-gateway` | `GET /metrics` `/livez` `/readyz` via a standalone http listener | `METRICS_PORT` (`:9464`) |
+| `@cue/ai-orchestrator` | `GET /metrics` `/livez` `/readyz` via a standalone http listener | `METRICS_PORT` (`:9464`) |
+
+Nest wiring: `ObservabilityModule.forRoot({ serviceName: 'api' })` in
+`AppModule` registers the logging + metrics `APP_INTERCEPTOR`s and serves the
+four endpoints; a Postgres readiness check is registered against the injected
+`HEALTH_REGISTRY`. The non-Nest services stand up the listener via
+`@cue/observability`'s http-metrics-server and use `HealthRegistry.beginDraining()`
+on SIGTERM so `/readyz` returns `503` while in-flight work drains.
+
+### Reliability (per service)
+
+- **`@cue/api`** — `RateLimitModule` (`modules/rate-limit/`): a Redis sliding
+  window per authenticated user (IP fallback), `429 RATE_LIMITED` over limit,
+  **fails open** when `REDIS_URL` is unset.
+- **`@cue/ws-gateway`** — `WS_MAX_CONNECTIONS` hard cap (over-cap ⇒ `1013`) +
+  ingress/egress backpressure watermarks emitting `{t:'backpressure', level:…}`;
+  SIGTERM drains sockets within `SHUTDOWN_DRAIN_MS`.
+- **`@cue/ai-orchestrator`** — `admission/admission-control.service.ts` meters
+  new sessions against the **per-region** `CLAUDE_RPM_LIMIT` / `STT_CONCURRENCY`
+  budgets; provider calls to Deepgram/Claude go through circuit breakers
+  (`@cue/observability/reliability`) with the `@cue/core/reliability` degradation
+  ladder — no `retry()` on the live-cue path (latency budget).
+
+### Container images
+
+Each service ships a repo-root-context, multi-stage `Dockerfile` (Node 22,
+pnpm via corepack, `turbo build` → `pnpm deploy --prod` pruned runtime; no dev
+deps or source in the final layer). Build from the **repo root**:
+
+```bash
+docker build -f services/api/Dockerfile             -t cue-api .
+docker build -f services/ws-gateway/Dockerfile      -t cue-ws-gateway .
+docker build -f services/ai-orchestrator/Dockerfile -t cue-ai-orchestrator .
+```
+
+Exposed ports: `api` `3001`; `ws-gateway` `3002` + `9464`; `ai-orchestrator`
+`50051` + `9464`. Readiness is exposed via `/readyz` for the ALB target group
+rather than a container `HEALTHCHECK` (the slim runtime has no curl/wget).
+`deploy.yml` builds and promotes these by git SHA; `infra/modules/compute` wires
+the task defs, target groups, and SIGTERM `stopTimeout` drain. See the
+repo-root [`README.md`](../README.md) Phase 4 section for env vars and CI/CD.
 
 ## Phase 1 TODOs (carried forward)
 

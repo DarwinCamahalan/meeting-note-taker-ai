@@ -1,0 +1,30 @@
+# Keep the Docker build context lean and the frozen lockfile honest: never copy
+# host-installed deps or build output into the `build` stage — pnpm reinstalls
+# from pnpm-lock.yaml and Turbo rebuilds dist inside the image.
+**/node_modules
+**/dist
+**/out
+**/.next
+**/release
+**/build/Release
+**/*.tsbuildinfo
+
+# Turbo / tooling caches
+.turbo
+**/.turbo
+.pnpm-store
+
+# VCS, CI, docs, and local env — irrelevant to the runtime image
+.git
+.github
+docs
+infra
+**/*.md
+.env
+.env.*
+!.env.example
+
+# Editor / OS noise
+.DS_Store
+.vscode
+.idea

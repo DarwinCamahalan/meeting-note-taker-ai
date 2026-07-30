@@ -1,0 +1,284 @@
+# .github/workflows/release-desktop.yml
+#
+# Desktop release pipeline (docs/60-devops-infrastructure.md §7 + §11).
+# Triggered ONLY by a semver tag `desktop-v*` (never a normal merge).
+#
+#   1. verify-tamper  (REQUIRED GATE) — the update tamper-rejection suite
+#      (docs/05-remediation-plan.md; §7.7). A build cannot proceed unless a
+#      forged/absent .minisig, a swapped installer (bad sha512), and a
+#      key-id mismatch are all rejected. Release blocker.
+#   2. build (matrix) — native runners:
+#        macos-14      -> universal dmg+zip, Hardened Runtime, sign, notarize,
+#                         staple (APPLE_* secrets).
+#        windows-2022  -> nsis exe + .blockmap, code-sign (WIN_CSC_* secrets).
+#      Each emits its installers + latest*.yml, plus a CycloneDX SBOM and a
+#      SLSA provenance attestation (release gates §11.1 gates 4-5).
+#   3. sign-and-publish — INDEPENDENT manifest signing (§7.7): minisign-sign
+#      each latest*.yml with a key whose custody is SEPARATE from the R2 upload
+#      credentials and from the OS code-signing keys, THEN publish installers +
+#      manifests + detached .minisig to the R2 release feed.
+#
+# Trust-boundary invariant (§7.8): forging the binary needs the OS signing key,
+# forging the manifest needs the minisign key, and neither is the R2 write
+# credential — so no single secret compromise yields an installable update.
+
+name: release-desktop
+
+on:
+  push:
+    tags: ["desktop-v*"]
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel to publish to
+        type: choice
+        default: latest
+        options: [alpha, beta, latest]
+
+concurrency:
+  group: release-desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "9.12.3"
+  # Channel prefix on the R2 feed (dl.cue.app/{alpha,beta,latest}/). Tag pushes
+  # default to `latest`; a manual dispatch can target alpha/beta.
+  CHANNEL: ${{ github.event.inputs.channel || 'latest' }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # REQUIRED GATE — update tamper-rejection tests. Runs first; nothing builds
+  # or publishes if the independent-verification logic regresses.
+  # ---------------------------------------------------------------------------
+  verify-tamper:
+    name: update tamper-rejection suite (required)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      # Rejects: missing/forged .minisig, wrong pinned key-id, and a swapped
+      # installer (manifest sha512 no longer matches). See
+      # apps/desktop/src/main/update-verify.test.ts.
+      - name: Update tamper-rejection tests
+        run: pnpm --filter @cue/desktop run test:update-verify
+
+  # ---------------------------------------------------------------------------
+  # Build, sign, notarize per OS. Cross-signing macOS from Linux is not viable,
+  # so each OS builds on its own native runner (§7.1).
+  # ---------------------------------------------------------------------------
+  build:
+    name: build ${{ matrix.os }}
+    needs: verify-tamper
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      id-token: write # SLSA provenance
+      attestations: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: mac
+            runner: macos-14
+            build_script: package:mac
+          - os: win
+            runner: windows-2022
+            build_script: package:win
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      # electron-vite bundles @cue/* from their built dist/, so the workspace
+      # deps of the desktop app must be built first (Turbo `^build`).
+      - name: Build workspace dependencies
+        run: pnpm turbo run build --filter=@cue/desktop^...
+
+      # electron-builder reads all signing material from the environment; no
+      # cert bytes are ever committed. CSC_LINK / WIN_CSC_LINK accept a base64
+      # of the .p12/.pfx directly. Notarization creds are consumed by the
+      # afterSign hook (apps/desktop/build/notarize.cjs).
+      - name: Build · sign · notarize
+        working-directory: apps/desktop
+        run: pnpm run ${{ matrix.build_script }}
+        env:
+          # ---- macOS Developer ID signing + notarization (§7.2) ----
+          CSC_LINK: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          CSC_KEY_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # ---- Windows code signing (§7.3) ----
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          # electron-builder must NOT auto-publish; publishing + independent
+          # manifest signing happen in the sign-and-publish job.
+          # (package:mac / package:win already pass --publish never.)
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Fail the build if macOS was signed but not stapled — a stapled ticket is
+      # required for offline Gatekeeper (§7.2). No-op on Windows.
+      - name: Verify staple (macOS)
+        if: matrix.os == 'mac'
+        working-directory: apps/desktop/release
+        run: |
+          set -euo pipefail
+          for dmg in *.dmg; do
+            echo "Validating staple on $dmg"
+            xcrun stapler validate "$dmg"
+          done
+
+      # Gate 4 — CycloneDX/Syft SBOM of the produced installers.
+      - name: Generate SBOM (Syft)
+        uses: anchore/sbom-action@v0
+        with:
+          path: apps/desktop/release
+          format: cyclonedx-json
+          output-file: apps/desktop/release/sbom-${{ matrix.os }}.cyclonedx.json
+          artifact-name: sbom-desktop-${{ matrix.os }}.cyclonedx.json
+
+      # Gate 5 — SLSA provenance over every installer + manifest this OS made.
+      - name: Attest artifact provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest*.yml
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest*.yml
+            apps/desktop/release/sbom-${{ matrix.os }}.cyclonedx.json
+
+  # ---------------------------------------------------------------------------
+  # Independent manifest signing (§7.7) + publish to the R2 feed.
+  # Runs on the `desktop-release` GitHub Environment so the minisign key and R2
+  # write credentials are scoped to this step alone (§8).
+  # ---------------------------------------------------------------------------
+  sign-and-publish:
+    name: minisign manifests · publish → R2
+    needs: build
+    runs-on: ubuntu-latest
+    environment: desktop-release
+    steps:
+      - name: Download all OS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Install minisign
+        run: sudo apt-get update && sudo apt-get install -y minisign
+
+      # Sign EACH manifest with the offline-custody key, producing a detached
+      # latest*.yml.minisig. The private key is injected base64-encoded from a
+      # secret scoped to this environment ONLY; it is never used for R2 writes
+      # or code signing (custody split, §7.7 table). The client verifies this
+      # signature against the pinned public key BEFORE reading any sha512.
+      - name: Sign manifests (minisign, independent key)
+        env:
+          MINISIGN_SECRET_KEY_B64: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_KEY_PASSWORD: ${{ secrets.MINISIGN_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keyfile="$(mktemp)"
+          trap 'shred -u "$keyfile" 2>/dev/null || rm -f "$keyfile"' EXIT
+          printf '%s' "$MINISIGN_SECRET_KEY_B64" | base64 -d > "$keyfile"
+
+          shopt -s nullglob
+          manifests=(dist/latest*.yml)
+          if [ ${#manifests[@]} -eq 0 ]; then
+            echo "::error::no latest*.yml manifests found to sign" >&2
+            exit 1
+          fi
+          for m in "${manifests[@]}"; do
+            echo "minisign -> $m"
+            printf '%s\n' "$MINISIGN_KEY_PASSWORD" | minisign -S \
+              -s "$keyfile" \
+              -m "$m" \
+              -t "cue desktop ${GITHUB_REF_NAME} $(date -u +%FT%TZ)"
+            test -f "${m}.minisig" || { echo "::error::missing ${m}.minisig" >&2; exit 1; }
+          done
+
+      # Re-verify the freshly-made signatures against the PINNED public key
+      # before anything is published — a signature we cannot verify with the
+      # key baked into shipped clients must never reach the feed.
+      - name: Verify manifests against pinned public key
+        env:
+          MINISIGN_PUBLIC_KEY: ${{ vars.MINISIGN_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          pub="$(mktemp)"
+          printf '%s\n' "$MINISIGN_PUBLIC_KEY" > "$pub"
+          shopt -s nullglob
+          for m in dist/latest*.yml; do
+            echo "verify <- $m"
+            minisign -V -p "$pub" -m "$m"
+          done
+
+      # Publish to Cloudflare R2 (S3-compatible). R2 write creds are a SEPARATE
+      # secret scope from the minisign key (custody split). Immutable per-version
+      # objects; the channel prefix (latest|beta|alpha) selects the feed.
+      - name: Publish to R2 feed
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          aws s3 cp dist "s3://${R2_BUCKET}/${CHANNEL}/" \
+            --recursive \
+            --endpoint-url "$R2_ENDPOINT" \
+            --exclude "*" \
+            --include "*.dmg" \
+            --include "*.zip" \
+            --include "*.exe" \
+            --include "*.blockmap" \
+            --include "latest*.yml" \
+            --include "latest*.yml.minisig" \
+            --include "*.cyclonedx.json"
+          echo "Published channel '${CHANNEL}' to ${R2_BUCKET}."
+          echo "Staged rollout: bump stagingPercentage in latest*.yml (§7.6) after Sentry crash-free is green."

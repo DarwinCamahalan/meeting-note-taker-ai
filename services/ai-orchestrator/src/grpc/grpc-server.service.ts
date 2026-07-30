@@ -6,7 +6,10 @@ import type {
 } from '@cue/proto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import type { HealthRegistry, MetricsRegistry } from '@cue/observability';
 import { ORCHESTRATOR_CONFIG, type OrchestratorEnv } from '../config/env.js';
+import { HEALTH_REGISTRY, METRICS_REGISTRY } from '../observability/telemetry.js';
+import { AdmissionControlService } from '../admission/admission-control.service.js';
 import { OrchestratorService } from '../orchestrator/orchestrator.service.js';
 import { StreamSession } from '../orchestrator/stream-session.js';
 
@@ -26,7 +29,14 @@ export class GrpcServerService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @Inject(ORCHESTRATOR_CONFIG) private readonly config: OrchestratorEnv,
     private readonly orchestrators: OrchestratorService,
-  ) {}
+    private readonly admission: AdmissionControlService,
+    @Inject(METRICS_REGISTRY) private readonly metrics: MetricsRegistry,
+    @Inject(HEALTH_REGISTRY) private readonly health: HealthRegistry,
+  ) {
+    // Readiness reflects the bound gRPC server; `onModuleDestroy` clears it so a
+    // draining task reports `down` and the ALB stops routing.
+    this.health.registerReadiness('grpc-server', () => this.server !== undefined);
+  }
 
   async onModuleInit(): Promise<void> {
     const server = new grpc.Server();
@@ -55,7 +65,12 @@ export class GrpcServerService implements OnModuleInit, OnModuleDestroy {
   private handlers(): OrchestratorHandlers {
     return {
       Stream: (call: grpc.ServerDuplexStream<ClientEnvelope, ServerEnvelope>) => {
-        const session = new StreamSession(call, (start) => this.orchestrators.create(start));
+        const session = new StreamSession(
+          call,
+          (start) => this.orchestrators.create(start),
+          { metrics: this.metrics, region: this.config.region },
+          this.admission,
+        );
         call.on('data', (envelope: ClientEnvelope) => session.handleEnvelope(envelope));
         call.on('end', () => {
           void session.finish();

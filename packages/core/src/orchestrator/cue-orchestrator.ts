@@ -9,11 +9,23 @@ import {
   type RagContextProvider,
 } from '../rag/context-provider.js';
 import { DeepgramSttClient } from '../stt/deepgram-client.js';
-import type { CuePipeline, OrchestratorConfig } from '../types.js';
+import type { CueContext, CuePipeline, OrchestratorConfig } from '../types.js';
+import {
+  DegradationController,
+  ResilientCueClient,
+  ResilientSttClient,
+  type DegradationChange,
+  type SttClient,
+} from '../reliability/index.js';
 import { RollingTranscript } from './context.js';
 
 /** Default hard cap on the one-per-session retrieval wait (latency guard). */
 const DEFAULT_RAG_BUDGET_MS = 400;
+
+/** The minimal streaming-LLM surface the orchestrator consumes. */
+interface CueStreamer {
+  streamCue(context: CueContext, signal?: AbortSignal): AsyncGenerator<CueEvent>;
+}
 
 /**
  * Wires STT -> LLM into the Phase 0 end-to-end thread.
@@ -30,17 +42,21 @@ const DEFAULT_RAG_BUDGET_MS = 400;
  * single main-process consumer in Phase 0.
  */
 export class CueOrchestrator implements CuePipeline {
-  private readonly stt: DeepgramSttClient;
-  private readonly llm: ClaudeCueClient;
+  private readonly stt: SttClient;
+  private readonly llm: CueStreamer;
   private readonly transcript = new RollingTranscript();
 
   private stateCb: ((s: SessionState) => void) | undefined;
   private transcriptCb: ((t: TranscriptEvent) => void) | undefined;
   private cueCb: ((e: CueEvent) => void) | undefined;
+  private degradationCb: ((change: DegradationChange) => void) | undefined;
 
   private started = false;
   /** Aborts the currently-streaming cue when a newer one supersedes it. */
   private cueController: AbortController | undefined;
+
+  /* --- Reliability (Phase 4) — graceful degradation ladder (70 §5.3). --- */
+  private readonly degradation: DegradationController | undefined;
 
   /* --- RAG (Phase 2, opt-in) --- */
   private readonly rag: RagContextProvider | undefined;
@@ -51,8 +67,28 @@ export class CueOrchestrator implements CuePipeline {
   private ragPrimed = false;
 
   constructor(config: OrchestratorConfig) {
-    this.stt = new DeepgramSttClient({ apiKey: config.deepgramApiKey });
-    this.llm = new ClaudeCueClient({ apiKey: config.anthropicApiKey });
+    const resilient = config.reliability?.enabled ?? true;
+    if (resilient) {
+      const degradation = new DegradationController({
+        onChange: (change) => this.degradationCb?.(change),
+      });
+      this.degradation = degradation;
+      this.stt = new ResilientSttClient({
+        factory: () => new DeepgramSttClient({ apiKey: config.deepgramApiKey }),
+        onDegradation: (level) => degradation.setStt(level),
+      });
+      this.llm = new ResilientCueClient({
+        client: new ClaudeCueClient({ apiKey: config.anthropicApiKey }),
+        degradation,
+        ...(config.reliability?.slowTtftMs !== undefined
+          ? { slowTtftMs: config.reliability.slowTtftMs }
+          : {}),
+      });
+    } else {
+      this.degradation = undefined;
+      this.stt = new DeepgramSttClient({ apiKey: config.deepgramApiKey });
+      this.llm = new ClaudeCueClient({ apiKey: config.anthropicApiKey });
+    }
     this.stt.onTranscript((t) => this.handleTranscript(t));
     this.rag = config.rag?.provider;
     this.ragBudgetMs = ragBudget(config.rag);
@@ -97,10 +133,21 @@ export class CueOrchestrator implements CuePipeline {
     this.cueCb = cb;
   }
 
+  /**
+   * Subscribe to graceful-degradation ladder transitions (70 §5.3) for
+   * logs/metrics/UI. No-op when reliability is disabled. Last-writer-wins.
+   */
+  onDegradation(cb: (change: DegradationChange) => void): void {
+    this.degradationCb = cb;
+  }
+
   private handleTranscript(event: TranscriptEvent): void {
     this.emitTranscript(event);
     if (event.kind !== 'final' || event.text.trim().length === 0) return;
     this.transcript.add(event);
+    // Ladder step 3/5: auto-cues paused (Claude shedding or STT unavailable).
+    // The transcript ribbon above still flows — the user is never blind.
+    if (this.degradation && !this.degradation.autoCuesEnabled) return;
     void this.generateCue();
   }
 

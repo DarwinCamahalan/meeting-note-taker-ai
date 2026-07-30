@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
+import { ObservabilityModule } from '@cue/observability/nest';
 import { ConfigModule } from './config/config.module.js';
+import { RateLimitModule } from './modules/rate-limit/rate-limit.module.js';
 import { DbModule } from './database/db.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { BillingModule } from './modules/billing/billing.module.js';
@@ -17,6 +19,8 @@ import { UsageModule } from './modules/usage/usage.module.js';
 @Module({
   imports: [
     ConfigModule,
+    ObservabilityModule.forRoot({ serviceName: 'api' }),
+    RateLimitModule,
     DbModule,
     HealthModule,
     AuthModule,

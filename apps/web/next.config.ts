@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next';
+import { withSentryConfig } from '@sentry/nextjs';
 
 /**
  * Cue web (marketing + download) Next.js config.
@@ -30,4 +31,21 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+/**
+ * Wrap with the Sentry build plugin (source-map upload + tunnel route). It is
+ * inert at build time unless SENTRY_* build env is present, and never changes
+ * runtime behavior when no DSN is configured. Auth token / org / project are
+ * read from env by the plugin (SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT).
+ */
+const sentryOrg = process.env['SENTRY_ORG'];
+const sentryProject = process.env['SENTRY_PROJECT'];
+
+export default withSentryConfig(nextConfig, {
+  silent: !process.env['CI'],
+  ...(sentryOrg ? { org: sentryOrg } : {}),
+  ...(sentryProject ? { project: sentryProject } : {}),
+  // Route browser telemetry through the app origin to survive ad-blockers.
+  tunnelRoute: '/monitoring',
+  // Do not fail the build when the (optional) auth token is absent.
+  widenClientFileUpload: true,
+});
