@@ -2,16 +2,19 @@ import { useCallback, useState } from 'react';
 import { useCueStore } from './store';
 import { useCueStream } from './hooks/use-cue-stream';
 import { useAudioCapture } from './hooks/use-audio-capture';
+import { useSystemAudioConsent } from './hooks/use-consent';
 import { useAuth } from './hooks/use-auth';
 import { Overlay } from './components/Overlay';
+import { ConsentDialog } from './components/ConsentDialog';
 import { AuthChip } from './components/AuthChip';
+import type { AudioSource } from './types';
 import './styles.css';
 
 /**
  * Renderer entry / orchestrator (logic-light by design). It wires the store to
- * the main-process streams, owns the session on/off toggle, and coordinates the
- * mic capture with `window.cue.startSession()` / `stopSession()`. All rendering
- * lives in <Overlay> and its children; all reduction lives in the store.
+ * the main-process streams, owns the session on/off toggle + audio-source
+ * selection, gates system-audio capture behind a one-time consent disclosure,
+ * and coordinates capture with `window.cue.startSession()` / `stopSession()`.
  */
 export function App(): React.JSX.Element {
   useCueStream();
@@ -22,19 +25,36 @@ export function App(): React.JSX.Element {
   const reset = useCueStore((s) => s.reset);
 
   const audio = useAudioCapture();
+  const consent = useSystemAudioConsent();
   const auth = useAuth();
   const [active, setActive] = useState(false);
+  const [source, setSource] = useState<AudioSource>('mic');
+  const [consentOpen, setConsentOpen] = useState(false);
 
-  const handleStart = useCallback(async (): Promise<void> => {
-    setActive(true);
-    reset();
-    try {
-      await window.cue.startSession();
-      await audio.start();
-    } catch {
-      setActive(false);
+  // Open capture FIRST (it uses the fresh click gesture that getDisplayMedia
+  // needs) and only start the session if capture actually came up.
+  const beginCapture = useCallback(
+    async (src: AudioSource): Promise<void> => {
+      setActive(true);
+      reset();
+      try {
+        await audio.start(src);
+        await window.cue.startSession();
+      } catch {
+        audio.stop();
+        setActive(false);
+      }
+    },
+    [audio, reset],
+  );
+
+  const handleStart = useCallback((): void => {
+    if (source !== 'mic' && !consent.granted) {
+      setConsentOpen(true);
+      return;
     }
-  }, [audio, reset]);
+    void beginCapture(source);
+  }, [source, consent.granted, beginCapture]);
 
   const handleStop = useCallback(async (): Promise<void> => {
     audio.stop();
@@ -45,19 +65,34 @@ export function App(): React.JSX.Element {
     }
   }, [audio]);
 
+  const acknowledgeConsent = useCallback((): void => {
+    consent.grant();
+    setConsentOpen(false);
+    void beginCapture(source);
+  }, [consent, source, beginCapture]);
+
   const currentCue = cues.length > 0 ? (cues[cues.length - 1] ?? null) : null;
 
   return (
-    <Overlay
-      state={state}
-      cue={currentCue}
-      partial={partial}
-      active={active}
-      capturing={audio.capturing}
-      captureError={audio.error}
-      onStart={() => void handleStart()}
-      onStop={() => void handleStop()}
-      authSlot={<AuthChip state={auth.state} onLogin={auth.login} onLogout={auth.logout} />}
-    />
+    <>
+      <Overlay
+        state={state}
+        cue={currentCue}
+        partial={partial}
+        active={active}
+        source={source}
+        onSourceChange={setSource}
+        capturing={audio.capturing}
+        captureError={audio.error}
+        onStart={handleStart}
+        onStop={() => void handleStop()}
+        authSlot={<AuthChip state={auth.state} onLogin={auth.login} onLogout={auth.logout} />}
+      />
+      <ConsentDialog
+        open={consentOpen}
+        onAcknowledge={acknowledgeConsent}
+        onCancel={() => setConsentOpen(false)}
+      />
+    </>
   );
 }

@@ -1,6 +1,7 @@
 import type { SessionState } from '@cue/types';
-import type { CueVm } from '../types';
+import type { AudioSource, CueVm } from '../types';
 import { CueCard } from './CueCard';
+import { SourceSelector } from './SourceSelector';
 import { StatusIndicator } from './StatusIndicator';
 
 interface OverlayProps {
@@ -10,6 +11,9 @@ interface OverlayProps {
   partial: string;
   /** Whether a session is currently running (drives the Start/Stop label). */
   active: boolean;
+  /** Selected audio source (mic / system / both). */
+  source: AudioSource;
+  onSourceChange(source: AudioSource): void;
   capturing: boolean;
   captureError: string | null;
   onStart(): void;
@@ -24,13 +28,26 @@ interface OverlayProps {
  * interactive controls opt out via the `no-drag` class in styles.css.
  */
 export function Overlay(props: OverlayProps): React.JSX.Element {
-  const { state, cue, partial, active, capturing, captureError, onStart, onStop, authSlot } = props;
+  const {
+    state,
+    cue,
+    partial,
+    active,
+    source,
+    onSourceChange,
+    capturing,
+    captureError,
+    onStart,
+    onStop,
+    authSlot,
+  } = props;
 
   return (
     <main className="overlay" data-state={state}>
       <header className="overlay__bar">
         <StatusIndicator state={state} capturing={capturing} />
         <div className="overlay__actions">
+          <SourceSelector value={source} disabled={active} onChange={onSourceChange} />
           {authSlot}
           <button
             type="button"
@@ -45,7 +62,7 @@ export function Overlay(props: OverlayProps): React.JSX.Element {
       <CueCard cue={cue} thinking={state === 'thinking'} />
 
       {partial ? <p className="overlay__partial">{partial}</p> : null}
-      {captureError ? <p className="overlay__error">Mic: {captureError}</p> : null}
+      {captureError ? <p className="overlay__error">Audio: {captureError}</p> : null}
     </main>
   );
 }

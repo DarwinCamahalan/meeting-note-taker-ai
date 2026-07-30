@@ -4,7 +4,7 @@
 
 ## The one thing to know first
 
-**All five phases (0–4) are merged to `dev`.** `main` is intentionally **held** at the v0.4.0 plan-docs baseline (the docs merges, PRs #1–#5) pending a local build/validation pass. So `dev` is the as-built code; `main` is still just the plan. Do not "catch main up" without an explicit instruction — see [`../AGENTS.md`](../AGENTS.md) and [`../RULES.md`](../RULES.md).
+**All five phases (0–4) are merged to `dev`.** `main` was originally held at the v0.4.0 plan-docs baseline, but is now the **live web-deploy branch** — Vercel builds `apps/web` from `main`, so during the AssistMe rebrand it was advanced to carry the rebrand + the desktop-packaging enablement. The current promotion policy: **web / docs / verified low-risk build-config flow `dev`→`main` automatically; untested backend & desktop _runtime_ code stays on `dev` until the user builds/tests it** (the backend `docker-compose` stand-up is on `dev` only, pending a local run). Do not promote runtime code to `main` without an explicit go-ahead — see [`../AGENTS.md`](../AGENTS.md) and [`../RULES.md`](../RULES.md).
 
 ## PR → phase map
 
@@ -156,6 +156,17 @@ gitGraph
 - **Enablement fixes** (committed): moved `electron` → `devDependencies` (electron-builder rejects it in `dependencies`); added `author`; added a **zero-dependency icon generator** `build/make-icon.py` → `build/icon.png` (indigo→violet brand gradient + cue-bubble glyph) from which electron-builder derives `.icns`/`.ico`.
 
 Unsigned / arm64 / single-arch is the **local dev/QA** build. The **signed + notarized + universal** build is CI-only (`release-desktop.yml`) and needs the Apple/Windows cert env vars documented in [`05-setup-and-run.md`](05-setup-and-run.md). Runtime still needs API keys (Phase 0) and, for gateway mode, the backend spine — the app launches and shows the protected overlay without them, but live cues require them. Artifacts live under `apps/desktop/release/` (gitignored).
+
+## Milestone: native system-audio loopback (the headline capability)
+
+**2026-07-30.** AssistMe can now hear the **other party**, not just the local mic — the feature the product is really about. Built at the user's explicit request (which lifted the earlier descope *for this feature*), with an in-app consent gate standing in for the still-absent legal framework.
+
+- **No native addon.** Electron ≥31 exposes system-audio loopback through `getDisplayMedia`: the renderer calls `getDisplayMedia({ video:true, audio:true })`, the main process's `setDisplayMediaRequestHandler` ([`apps/desktop/src/main/loopback.ts`](../apps/desktop/src/main/loopback.ts)) returns `{ video: <screen>, audio: 'loopback' }`, and the renderer drops the video track. ScreenCaptureKit backs it on macOS 13+, WASAPI on Windows.
+- **Mic / System / Both**, mixed. The capture hook opens 1–2 streams and sums them into one 16 kHz mono ScriptProcessor graph → the existing `sendAudioChunk` pipeline. "Both" = the full conversation in a single STT stream.
+- **Consent gate.** [`hooks/use-consent.ts`](../apps/desktop/src/renderer/hooks/use-consent.ts) + [`components/ConsentDialog.tsx`](../apps/desktop/src/renderer/components/ConsentDialog.tsx): a one-time, locally-persisted disclosure before any system-inclusive capture. It's a disclosure, **not** legal cover — the descoped consent/compliance framework still doesn't exist.
+- **Verified:** desktop typecheck + `electron-vite build` pass; repackaged into the arm64 `.dmg`. Residual: macOS Screen Recording permission is a runtime prompt; no per-speaker diarization yet (both sides mixed).
+
+Runtime code — merged to `dev`, **held from `main`** pending a local test run (see [the promotion policy](#the-one-thing-to-know-first)).
 
 ## Cross-cutting: what never got built (and why)
 
