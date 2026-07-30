@@ -60,6 +60,12 @@ export function ActivateScreen() {
       <p className="mt-6 text-xs text-white/35">
         Only approve if you just started sign-in from the Cue app on this device.
       </p>
+
+      <div className="mt-6 border-t border-white/10 pt-4 text-center">
+        <a href="/signin" className="text-sm text-cue-200 transition hover:text-cue-100">
+          Sign in with SSO
+        </a>
+      </div>
     </div>
   );
 }
