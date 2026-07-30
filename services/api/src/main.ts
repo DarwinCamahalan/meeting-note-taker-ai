@@ -6,7 +6,10 @@ import { AllExceptionsFilter } from './common/all-exceptions.filter.js';
 import { AppConfig } from './config/app-config.js';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: false });
+  // `rawBody: true` preserves the exact request bytes on `req.rawBody` so the
+  // Stripe webhook route can verify the signature, while all other routes still
+  // receive normally-parsed JSON. Required by BillingWebhooksController.
+  const app = await NestFactory.create(AppModule, { bufferLogs: false, rawBody: true });
   const config = app.get(AppConfig);
 
   app.useGlobalFilters(new AllExceptionsFilter());

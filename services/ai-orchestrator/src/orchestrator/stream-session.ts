@@ -22,8 +22,12 @@ import {
   toServerTranscript,
 } from './mappers.js';
 
-/** Constructs a fresh, unstarted pipeline for a stream. */
-export type OrchestratorFactory = () => CuePipeline;
+/**
+ * Constructs a fresh, unstarted pipeline for a stream. Receives the
+ * StartSession so per-session context (org + document scope for RAG) can be
+ * bound into the pipeline before it starts.
+ */
+export type OrchestratorFactory = (start: StartSession) => CuePipeline;
 
 export class StreamSession {
   private readonly logger = new Logger(StreamSession.name);
@@ -80,7 +84,7 @@ export class StreamSession {
       return;
     }
     this.format = start.format;
-    const pipeline = this.createPipeline();
+    const pipeline = this.createPipeline(start);
     this.pipeline = pipeline;
     pipeline.onState((state) => this.send(toServerState(state)));
     pipeline.onTranscript((event) => this.send(toServerTranscript(event, this.nextTranscriptSeq(event))));

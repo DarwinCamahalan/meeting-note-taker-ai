@@ -14,6 +14,13 @@ export const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
 
   /**
+   * Voyage AI key for `voyage-3.5` embeddings (RAG document ingest + query).
+   * Optional so the app boots without it; document upload fails fast with a
+   * clear error when it is unset.
+   */
+  VOYAGE_API_KEY: z.string().optional(),
+
+  /**
    * Dev ES256 keypair (PKCS#8 private / SPKI public), PEM with literal `\n`
    * escapes accepted. Optional in dev — an ephemeral keypair is generated when
    * absent. TODO(prod: KMS asymmetric signing per 40-authentication.md §2.3).
@@ -33,6 +40,17 @@ export const EnvSchema = z.object({
   DEVICE_CODE_TTL: z.coerce.number().int().positive().default(600),
   DEVICE_CODE_INTERVAL: z.coerce.number().int().positive().default(2),
   WS_TICKET_TTL: z.coerce.number().int().positive().default(60),
+
+  /* ---- Billing (Stripe). All optional so the app boots without billing in
+   * local dev; BillingModule / BillingWebhooksModule throw a clear error at
+   * call time when a required key is absent (fail-loud, never silently). ---- */
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  STRIPE_PRICE_PRO: z.string().optional(),
+  STRIPE_PRICE_TEAM: z.string().optional(),
+  STRIPE_PRICE_OVERAGE: z.string().optional(),
+  /** Stripe Customer Portal configuration id (optional; pins allowed prices). */
+  STRIPE_PORTAL_CONFIG_ID: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
@@ -45,6 +63,7 @@ export class AppConfig {
   readonly nodeEnv: Env['NODE_ENV'];
   readonly apiPort: number;
   readonly databaseUrl: string;
+  readonly voyageApiKey: string | undefined;
   readonly jwtPrivateKey: string | undefined;
   readonly jwtPublicKey: string | undefined;
   readonly webBaseUrl: string;
@@ -54,11 +73,18 @@ export class AppConfig {
   readonly deviceCodeTtl: number;
   readonly deviceCodeInterval: number;
   readonly wsTicketTtl: number;
+  readonly stripeSecretKey: string | undefined;
+  readonly stripeWebhookSecret: string | undefined;
+  readonly stripePricePro: string | undefined;
+  readonly stripePriceTeam: string | undefined;
+  readonly stripePriceOverage: string | undefined;
+  readonly stripePortalConfigId: string | undefined;
 
   constructor(env: Env) {
     this.nodeEnv = env.NODE_ENV;
     this.apiPort = env.API_PORT;
     this.databaseUrl = env.DATABASE_URL;
+    this.voyageApiKey = env.VOYAGE_API_KEY;
     this.jwtPrivateKey = env.JWT_PRIVATE_KEY;
     this.jwtPublicKey = env.JWT_PUBLIC_KEY;
     this.webBaseUrl = env.WEB_BASE_URL;
@@ -68,6 +94,12 @@ export class AppConfig {
     this.deviceCodeTtl = env.DEVICE_CODE_TTL;
     this.deviceCodeInterval = env.DEVICE_CODE_INTERVAL;
     this.wsTicketTtl = env.WS_TICKET_TTL;
+    this.stripeSecretKey = env.STRIPE_SECRET_KEY;
+    this.stripeWebhookSecret = env.STRIPE_WEBHOOK_SECRET;
+    this.stripePricePro = env.STRIPE_PRICE_PRO;
+    this.stripePriceTeam = env.STRIPE_PRICE_TEAM;
+    this.stripePriceOverage = env.STRIPE_PRICE_OVERAGE;
+    this.stripePortalConfigId = env.STRIPE_PORTAL_CONFIG_ID;
     Object.freeze(this);
   }
 

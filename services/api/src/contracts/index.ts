@@ -9,3 +9,4 @@ export * from './auth.contract.js';
 export * from './identity.contract.js';
 export * from './sessions.contract.js';
 export * from './documents.contract.js';
+export * from './billing.contract.js';
