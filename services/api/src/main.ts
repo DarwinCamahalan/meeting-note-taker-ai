@@ -20,7 +20,7 @@ async function bootstrap(): Promise<void> {
   const config = app.get(AppConfig);
 
   app.useGlobalFilters(new AllExceptionsFilter());
-  app.enableCors({ origin: config.webBaseUrl, credentials: true });
+  app.enableCors({ origin: config.corsOrigins, credentials: true });
   app.enableShutdownHooks();
 
   // Deep readiness: prove Postgres is reachable so `/readyz` drains the task at

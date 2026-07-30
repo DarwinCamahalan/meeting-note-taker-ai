@@ -4,7 +4,7 @@
 
 ## The one thing to know first
 
-**All five phases (0–4) are merged to `dev`.** `main` is intentionally **held** at the v0.4.0 plan-docs baseline (the docs merges, PRs #1–#5) pending a local build/validation pass. So `dev` is the as-built code; `main` is still just the plan. Do not "catch main up" without an explicit instruction — see [`../AGENTS.md`](../AGENTS.md) and [`../RULES.md`](../RULES.md).
+**All five phases (0–4) are merged to `dev`.** `main` was originally held at the v0.4.0 plan-docs baseline, but is now the **live web-deploy branch** — Vercel builds `apps/web` from `main`, so during the AssistMe rebrand it was advanced to carry the rebrand + the desktop-packaging enablement. The current promotion policy: **web / docs / verified low-risk build-config flow `dev`→`main` automatically; untested backend & desktop _runtime_ code stays on `dev` until the user builds/tests it** (the backend `docker-compose` stand-up is on `dev` only, pending a local run). Do not promote runtime code to `main` without an explicit go-ahead — see [`../AGENTS.md`](../AGENTS.md) and [`../RULES.md`](../RULES.md).
 
 ## PR → phase map
 

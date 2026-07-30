@@ -1,0 +1,118 @@
+# docker-compose.yml — $0 local full-stack for AssistMe's backend spine.
+#
+# Brings up Postgres 16 + pgvector, Redis, and all three services
+# (api :3001, ws-gateway :3002, ai-orchestrator gRPC :50051) so the desktop app
+# can run in CUE_BACKEND=gateway mode entirely on your machine, for free.
+#
+#   cp .env.example .env      # then fill ANTHROPIC_API_KEY + DEEPGRAM_API_KEY
+#                             # (+ VOYAGE_API_KEY for RAG, + a JWT keypair for
+#                             #  gateway auth — see docs/62-free-tier-hosting.md)
+#   docker compose up --build
+#   docker compose down -v    # reset (drops the DB volume + re-runs migrations)
+#
+# The hosted, still-free path (Neon + Upstash + Render) is in
+# docs/62-free-tier-hosting.md. This file is for LOCAL dev/demo, not production
+# (production infra is the Terraform in infra/, see docs/60).
+name: assistme
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cue
+      POSTGRES_PASSWORD: cue
+      POSTGRES_DB: cue
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Auto-apply the Drizzle SQL migrations on FIRST init only (files sort
+      # 0000 → 0001 → 0002). psql ignores the drizzle `--> statement-breakpoint`
+      # comments. For a hosted DB (Neon) run `pnpm db:migrate` instead — see
+      # docs/62. `docker compose down -v` wipes the volume so they re-run.
+      - ./packages/db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cue -d cue"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  ai-orchestrator:
+    build:
+      context: .
+      dockerfile: services/ai-orchestrator/Dockerfile
+    restart: unless-stopped
+    # ANTHROPIC_API_KEY, DEEPGRAM_API_KEY, VOYAGE_API_KEY come from .env.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      METRICS_PORT: "9464"
+      # No OTel collector in the $0 stack — keep tracing off to avoid noise.
+      OTEL_SDK_DISABLED: "true"
+    ports:
+      - "50051:50051"
+
+  ws-gateway:
+    build:
+      context: .
+      dockerfile: services/ws-gateway/Dockerfile
+    restart: unless-stopped
+    # Needs JWT_PUBLIC_KEY (from .env) to verify the ws-tickets api mints.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      WS_PORT: "3002"
+      METRICS_PORT: "9464"
+      ORCHESTRATOR_GRPC_ADDR: "ai-orchestrator:50051"
+      OTEL_SDK_DISABLED: "true"
+    ports:
+      - "3002:3002"
+    depends_on:
+      ai-orchestrator:
+        condition: service_started
+
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    restart: unless-stopped
+    # JWT_PRIVATE_KEY/JWT_PUBLIC_KEY, STRIPE_*, WORKOS_*, VOYAGE_API_KEY from .env.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      API_PORT: "3001"
+      NODE_ENV: "development"
+      # Service-DNS overrides (win over any values in .env):
+      DATABASE_URL: "postgres://cue:cue@postgres:5432/cue"
+      REDIS_URL: "redis://redis:6379"
+      ORCHESTRATOR_GRPC_ADDR: "ai-orchestrator:50051"
+      WS_PUBLIC_URL: "ws://localhost:3002"
+      WEB_BASE_URL: "http://localhost:3000"
+      # To let the DEPLOYED web (Vercel) call this API, set CORS_ORIGINS in .env:
+      #   CORS_ORIGINS=https://<your-app>.vercel.app,http://localhost:3000
+      OTEL_SDK_DISABLED: "true"
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
